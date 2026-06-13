@@ -290,6 +290,13 @@
         </svg>
         <span id="scanBtnLabel">Beolvasás kamerával</span>
     </button>
+    <button type="button" class="scan-btn" id="photoBtn" aria-label="Beolvasás fotóból">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 16-4.5-4.5L9 19"/>
+        </svg>
+        <span id="photoBtnLabel">Beolvasás fotóból</span>
+    </button>
+    <input type="file" id="photoInput" accept="image/*" hidden>
     <button type="button" class="scan-btn install-btn" id="installBtn" hidden aria-label="Telepítés">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>
@@ -382,7 +389,7 @@
                     yearUnknown: 'Ismeretlen évjárat', plantUnknown: function(c){ return 'Ismeretlen üzem (' + c + ')'; },
                     install: { button: 'Telepítés a kezdőképernyőre', iosHint: 'iPhone-on: Megosztás ▸ „Főképernyőhöz adás”.' },
                     scan: {
-                        button: 'Beolvasás kamerával', title: 'VIN beolvasása',
+                        button: 'Beolvasás kamerával', photo: 'Beolvasás fotóból / galériából', title: 'VIN beolvasása',
                         hint: 'Igazítsd a <b>VIN-t vagy a vonalkódot</b> a keretbe',
                         scanning: 'Vonalkód keresése…', capture: 'Szöveg beolvasása (OCR)',
                         ocrLoading: 'Felismerő betöltése…', ocrWorking: 'Felismerés folyamatban…',
@@ -452,7 +459,7 @@
                     yearUnknown: 'Unknown model year', plantUnknown: function(c){ return 'Unknown plant (' + c + ')'; },
                     install: { button: 'Install to home screen', iosHint: 'On iPhone: Share ▸ “Add to Home Screen”.' },
                     scan: {
-                        button: 'Scan with camera', title: 'Scan VIN',
+                        button: 'Scan with camera', photo: 'Scan from a photo / gallery', title: 'Scan VIN',
                         hint: 'Align the <b>VIN or barcode</b> inside the frame',
                         scanning: 'Looking for a barcode…', capture: 'Read text (OCR)',
                         ocrLoading: 'Loading recognizer…', ocrWorking: 'Recognizing…',
@@ -522,7 +529,7 @@
                     yearUnknown: 'Unbekanntes Modelljahr', plantUnknown: function(c){ return 'Unbekanntes Werk (' + c + ')'; },
                     install: { button: 'Zum Startbildschirm hinzufügen', iosHint: 'Auf dem iPhone: Teilen ▸ „Zum Home-Bildschirm“.' },
                     scan: {
-                        button: 'Mit Kamera scannen', title: 'VIN scannen',
+                        button: 'Mit Kamera scannen', photo: 'Aus Foto / Galerie scannen', title: 'VIN scannen',
                         hint: 'Richte die <b>VIN oder den Barcode</b> im Rahmen aus',
                         scanning: 'Suche nach Barcode…', capture: 'Text lesen (OCR)',
                         ocrLoading: 'Erkennung wird geladen…', ocrWorking: 'Erkennung läuft…',
@@ -821,6 +828,8 @@
             document.getElementById('scanBtn').setAttribute('aria-label', u.scan.button);
             setText('scanTitle', u.scan.title);
             setText('scanCaptureLabel', u.scan.capture);
+            setText('photoBtnLabel', u.scan.photo);
+            document.getElementById('photoBtn').setAttribute('aria-label', u.scan.photo);
             setText('installBtnLabel', u.install.button);
             document.getElementById('installBtn').setAttribute('aria-label', u.install.button);
             var btns = document.querySelectorAll('.lang-btn');
@@ -875,6 +884,9 @@
             var closeBtn = document.getElementById('scanClose');
             var torchBtn = document.getElementById('scanTorch');
             var openBtn = document.getElementById('scanBtn');
+            var photoBtn = document.getElementById('photoBtn');
+            var photoBtnLabel = document.getElementById('photoBtnLabel');
+            var photoInput = document.getElementById('photoInput');
 
             var stream = null, detector = null, barcodeTimer = null;
             var ocrWorker = null, ocrBusy = false, active = false, torchOn = false, videoTrack = null;
@@ -923,11 +935,14 @@
                 return null;
             }
 
-            function accept(vin, verified) {
+            function applyVin(vin, verified) {
                 try { if (navigator.vibrate) navigator.vibrate(verified ? 70 : [40, 60, 40]); } catch (e) {}
-                setHint('<b>' + (verified ? su().found : su().foundUnverified) + '</b> — ' + vin, verified ? 'ok' : '');
                 input.value = vin;
                 decode(vin);
+            }
+            function accept(vin, verified) {
+                setHint('<b>' + (verified ? su().found : su().foundUnverified) + '</b> — ' + vin, verified ? 'ok' : '');
+                applyVin(vin, verified);
                 setTimeout(close, 650);
             }
 
@@ -946,9 +961,29 @@
                 ocrWorker = await Tesseract.createWorker('eng');
                 await ocrWorker.setParameters({
                     tessedit_char_whitelist: VIN_CHARS,
-                    tessedit_pageseg_mode: '7' // egyetlen szövegsor
+                    tessedit_pageseg_mode: '7' // alap: egyetlen szövegsor
                 });
                 return ocrWorker;
+            }
+            // psm 7 = egy sor (élő kamera-sáv), psm 3 = teljes oldal (fotó, körülötte más szöveg).
+            async function ocrRecognize(image, psm) {
+                await ensureOcr();
+                try { await ocrWorker.setParameters({ tessedit_pageseg_mode: String(psm) }); } catch (e) {}
+                return ocrWorker.recognize(image);
+            }
+            // Szürkeárnyalat + kontrasztnyújtás (monitor-csillogás / gyenge fény ellen).
+            function preprocess(ctx, w, h) {
+                try {
+                    var img = ctx.getImageData(0, 0, w, h);
+                    var d = img.data;
+                    for (var i = 0; i < d.length; i += 4) {
+                        var g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+                        g = (g - 128) * 1.35 + 128;
+                        g = g < 0 ? 0 : g > 255 ? 255 : g;
+                        d[i] = d[i + 1] = d[i + 2] = g;
+                    }
+                    ctx.putImageData(img, 0, 0);
+                } catch (e) { /* getImageData tiltva? marad a nyers kép */ }
             }
 
             // A keret mögötti sávot vágja ki nagyítva, az OCR pontosságához.
@@ -964,18 +999,7 @@
                 canvas.height = cropH * scaleUp;
                 var ctx = canvas.getContext('2d', { willReadFrequently: true });
                 ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
-                // Szürkeárnyalat + kontrasztnyújtás — segít a monitor csillogása / gyenge fény ellen.
-                try {
-                    var img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    var d = img.data;
-                    for (var i = 0; i < d.length; i += 4) {
-                        var g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-                        g = (g - 128) * 1.35 + 128;
-                        g = g < 0 ? 0 : g > 255 ? 255 : g;
-                        d[i] = d[i + 1] = d[i + 2] = g;
-                    }
-                    ctx.putImageData(img, 0, 0);
-                } catch (e) { /* getImageData tiltva? marad a nyers kép */ }
+                preprocess(ctx, canvas.width, canvas.height);
                 return canvas;
             }
 
@@ -990,7 +1014,7 @@
                     setHint('<b>' + su().ocrWorking + '</b>');
                     var cv = gridToCanvas();
                     if (!cv) { setHint(su().notFound, 'err'); return; }
-                    var res = await ocrWorker.recognize(cv);
+                    var res = await ocrRecognize(cv, 7);
                     var rawText = (res && res.data ? res.data.text : '') || '';
                     var vin = findValidVin(rawText);
                     if (vin) { accept(vin, true); return; }
@@ -1004,6 +1028,68 @@
                 } finally {
                     ocrBusy = false;
                     if (active) { captureBtn.disabled = false; captureLabel.textContent = prevLabel || su().capture; }
+                }
+            }
+
+            // Kép (fotó/galéria) feldolgozása az overlay nélkül: teljes felbontás,
+            // előbb vonalkód, majd teljes oldalas OCR. Élesebb, mint az élő videó.
+            async function scanPhoto(file) {
+                if (!file) return;
+                var u = t().ui;
+                photoBtn.disabled = true;
+                var prevLabel = photoBtnLabel.textContent;
+                photoBtnLabel.innerHTML = '<span class="spinner"></span>';
+                statusBar.innerHTML = '<span class="count">…</span> · ' + su().ocrWorking;
+                gauge.className = 'gauge';
+                try {
+                    var bmp;
+                    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+                    catch (e) { bmp = await createImageBitmap(file); }
+                    var maxSide = 2200;
+                    var sc = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+                    var w = Math.max(1, Math.round(bmp.width * sc)), h = Math.max(1, Math.round(bmp.height * sc));
+                    canvas.width = w; canvas.height = h;
+                    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+                    ctx.drawImage(bmp, 0, 0, w, h);
+                    if (bmp.close) bmp.close();
+
+                    // 1) Vonalkód a teljes képen (ha a fotón matrica/vonalkód van).
+                    var raw = '';
+                    try {
+                        if ('BarcodeDetector' in window) {
+                            var sup = await window.BarcodeDetector.getSupportedFormats();
+                            var want = ['code_39', 'code_128', 'code_93', 'codabar', 'itf', 'qr_code', 'data_matrix', 'pdf417']
+                                .filter(function (f) { return sup.indexOf(f) !== -1; });
+                            if (want.length) {
+                                var det = new window.BarcodeDetector({ formats: want });
+                                var codes = await det.detect(canvas);
+                                if (codes && codes.length) raw = codes[0].rawValue || '';
+                            }
+                        }
+                    } catch (e) {}
+                    var vinBc = findValidVin(raw);
+                    if (vinBc) { applyVin(vinBc, true); return; }
+                    var looseBc = findVinLoose(raw);
+                    if (looseBc) { applyVin(looseBc, false); return; }
+
+                    // 2) Teljes oldalas OCR (psm 3) — a VIN körül más szöveg is lehet.
+                    preprocess(ctx, w, h);
+                    var res = await ocrRecognize(canvas, 3);
+                    var text = (res && res.data ? res.data.text : '') || '';
+                    var vin = findValidVin(text);
+                    if (vin) { applyVin(vin, true); return; }
+                    var guess = bestCandidate(text);
+                    if (guess) { applyVin(guess, false); return; }
+
+                    var preview = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 22);
+                    gauge.className = 'gauge bad';
+                    statusBar.innerHTML = '<span class="count">—</span> · ✗ ' + su().notFound + (preview ? ' · „' + preview + '…”' : '');
+                } catch (e) {
+                    gauge.className = 'gauge bad';
+                    statusBar.textContent = su().notFound;
+                } finally {
+                    photoBtn.disabled = false; photoBtnLabel.textContent = prevLabel || su().photo;
+                    photoInput.value = ''; // ugyanaz a fájl újra kiválasztható legyen
                 }
             }
 
@@ -1091,6 +1177,8 @@
             closeBtn.addEventListener('click', close);
             captureBtn.addEventListener('click', runOcr);
             torchBtn.addEventListener('click', toggleTorch);
+            photoBtn.addEventListener('click', function () { photoInput.click(); });
+            photoInput.addEventListener('change', function (e) { scanPhoto(e.target.files && e.target.files[0]); });
             document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && active) close(); });
 
             return { open: open, close: close };
