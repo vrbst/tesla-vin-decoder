@@ -1131,7 +1131,7 @@
                     catch (e) { bmp = await createImageBitmap(file); }
                     // Méretezés SZÉLESSÉG alapján (a vízszintes szöveg felbontása a fontos):
                     // sosem nagyítunk, az álló screenshot szélességét nem zsugorítjuk feleslegesen.
-                    var maxW = 1600, maxSide = 4000;
+                    var maxW = 2200, maxSide = 4000;
                     var sc = 1;
                     if (bmp.width > maxW) sc = maxW / bmp.width;
                     var longest = Math.max(bmp.width, bmp.height);
