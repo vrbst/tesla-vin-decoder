@@ -1015,7 +1015,7 @@
                     var d = img.data;
                     for (var i = 0; i < d.length; i += 4) {
                         var g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-                        g = (g - 128) * 1.35 + 128;
+                        g = (g - 128) * 1.2 + 128;
                         g = g < 0 ? 0 : g > 255 ? 255 : g;
                         d[i] = d[i + 1] = d[i + 2] = g;
                     }
@@ -1033,8 +1033,11 @@
                 var w = Math.max(1, Math.round(vw * sc)), h = Math.max(1, Math.round(vh * sc));
                 canvas.width = w; canvas.height = h;
                 var ctx = canvas.getContext('2d', { willReadFrequently: true });
+                // Enyhe blur: kioltja a monitor/kijelző moiré-hullámait (különben a VIN olvashatatlan).
+                try { ctx.filter = 'blur(1px)'; } catch (e) {}
                 ctx.drawImage(video, 0, 0, w, h);
-                return canvas; // az előfeldolgozást a hívó végzi (ne duplázódjon)
+                try { ctx.filter = 'none'; } catch (e) {}
+                return canvas; // a szürke/kontraszt előfeldolgozást a hívó végzi
             }
 
             function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -1131,7 +1134,7 @@
                     catch (e) { bmp = await createImageBitmap(file); }
                     // Méretezés SZÉLESSÉG alapján (a vízszintes szöveg felbontása a fontos):
                     // sosem nagyítunk, az álló screenshot szélességét nem zsugorítjuk feleslegesen.
-                    var maxW = 2200, maxSide = 4000;
+                    var maxW = 1600, maxSide = 4000;
                     var sc = 1;
                     if (bmp.width > maxW) sc = maxW / bmp.width;
                     var longest = Math.max(bmp.width, bmp.height);
@@ -1139,10 +1142,10 @@
                     var w = Math.max(1, Math.round(bmp.width * sc)), h = Math.max(1, Math.round(bmp.height * sc));
                     canvas.width = w; canvas.height = h;
                     var ctx = canvas.getContext('2d', { willReadFrequently: true });
-                    ctx.drawImage(bmp, 0, 0, w, h);
-                    if (bmp.close) bmp.close();
+                    ctx.filter = 'none';
+                    ctx.drawImage(bmp, 0, 0, w, h); // éles rajz a vonalkódhoz
 
-                    // 1) Vonalkód a teljes képen (ha a fotón matrica/vonalkód van).
+                    // 1) Vonalkód az éles képen (ha a fotón matrica/vonalkód van).
                     var raw = '';
                     try {
                         if ('BarcodeDetector' in window) {
@@ -1157,11 +1160,13 @@
                         }
                     } catch (e) {}
                     var vinBc = findValidVin(raw);
-                    if (vinBc) { applyVin(vinBc, true); return; }
+                    if (vinBc) { if (bmp.close) bmp.close(); applyVin(vinBc, true); return; }
                     var looseBc = findVinLoose(raw);
-                    if (looseBc) { applyVin(looseBc, false); return; }
+                    if (looseBc) { if (bmp.close) bmp.close(); applyVin(looseBc, false); return; }
 
-                    // 2) Teljes oldalas OCR (psm 3) — a VIN körül más szöveg is lehet.
+                    // 2) OCR-hez: enyhe blur (moiré/raszter ellen) + szürke/kontraszt, teljes oldal (psm 3).
+                    try { ctx.filter = 'blur(1px)'; ctx.drawImage(bmp, 0, 0, w, h); ctx.filter = 'none'; } catch (e) {}
+                    if (bmp.close) bmp.close();
                     preprocess(ctx, w, h);
                     var res = await ocrRecognize(canvas, 3);
                     var text = (res && res.data ? res.data.text : '') || '';
