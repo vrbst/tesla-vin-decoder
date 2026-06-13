@@ -1042,13 +1042,15 @@
 
             function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
-            // Bittérkép vászonra, méretkorláttal.
+            // Bittérkép vászonra, méretkorláttal + moiré-elnyomó blur.
             function bitmapToCanvas(bmp, maxW) {
                 var sc = Math.min(1, maxW / bmp.width);
                 var w = Math.max(1, Math.round(bmp.width * sc)), h = Math.max(1, Math.round(bmp.height * sc));
                 canvas.width = w; canvas.height = h;
                 var ctx = canvas.getContext('2d', { willReadFrequently: true });
+                try { ctx.filter = 'blur(1px)'; } catch (e) {}
                 ctx.drawImage(bmp, 0, 0, w, h);
+                try { ctx.filter = 'none'; } catch (e) {}
                 if (bmp.close) bmp.close();
                 return canvas;
             }
@@ -1058,7 +1060,7 @@
                     try {
                         var blob = await imageCapture.takePhoto();
                         var bmp = await createImageBitmap(blob);
-                        return bitmapToCanvas(bmp, 1800);
+                        return bitmapToCanvas(bmp, 1600);
                     } catch (e) { /* esik vissza videó-képkockára */ }
                 }
                 return captureFrame();
@@ -1077,13 +1079,14 @@
                 return '';
             }
 
-            // Egy automatikus OCR-próba a teljes képkockán. Érvényes VIN-re azonnal rázár;
-            // ha a gombbal „most" kértük, a legjobb tippet is elfogadja (érvénytelennel is).
+            // Egy automatikus OCR-próba. ÉLES fotót (takePhoto) készít — nem a lágy/moirés
+            // videó-képkockát —, mert csak az éles képből olvasható a monitor-VIN.
+            // Érvényes VIN-re azonnal rázár; gombnyomásra a legjobb tippet is elfogadja.
             async function scanFrameOnce() {
                 if (ocrBusy || !active) return false;
                 ocrBusy = true;
                 try {
-                    var cv = captureFrame();
+                    var cv = await grabStillCanvas();
                     if (!cv) return false;
                     preprocess(cv.getContext('2d', { willReadFrequently: true }), cv.width, cv.height);
                     var res = await ocrRecognize(cv, 3);
@@ -1110,7 +1113,7 @@
                 while (active) {
                     var done = await scanFrameOnce();
                     if (done) return;
-                    await sleep(80);
+                    await sleep(300); // levegő a takePhoto-k közt (előnézet ne fagyjon)
                 }
             }
 
