@@ -2,7 +2,7 @@
  * App-shell precache (offline) + runtime cache a Tesseract OCR CDN-hez.
  * A verzió emelésével (CACHE) frissül a gyorsítótár.
  */
-const CACHE = 'tvd-v3';
+const CACHE = 'tvd-v4';
 const SHELL = [
   './',
   './index.html',
@@ -48,14 +48,31 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Azonos eredetű app-shell: cache-first, hálózati frissítéssel.
   if (url.origin === self.location.origin) {
-    event.respondWith(
-      caches.match(req).then((cached) => cached || fetchAndCache(req))
-    );
+    // Lapbetöltés / HTML: network-first — online mindig a legfrissebb verzió jön,
+    // offline a gyorsítótárból. Így a frissítések azonnal látszanak, ha van net.
+    const isNav = req.mode === 'navigate' ||
+                  (req.headers.get('accept') || '').includes('text/html');
+    if (isNav) {
+      event.respondWith(
+        fetch(req)
+          .then((res) => { cachePut(req, res); return res; })
+          .catch(() => caches.match(req).then((c) => c || caches.match('./index.html')))
+      );
+      return;
+    }
+    // Egyéb azonos eredetű erőforrás (ikon, manifest): cache-first.
+    event.respondWith(caches.match(req).then((cached) => cached || fetchAndCache(req)));
     return;
   }
 });
+
+function cachePut(req, res) {
+  if (res && res.ok) {
+    const copy = res.clone();
+    caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+  }
+}
 
 function fetchAndCache(req) {
   return fetch(req).then((res) => {
