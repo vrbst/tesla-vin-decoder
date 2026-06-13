@@ -1268,10 +1268,11 @@
                 try { input.focus(); } catch (e) {}
             }
 
-            // A „kamera" gomb a telefon kamera-appját nyitja (éles, fókuszált fotó),
-            // és a megbízható fotós feldolgozót futtatja — nem reszelős élő videót.
-            openBtn.addEventListener('click', function () { cameraInput.click(); });
-            cameraInput.addEventListener('change', function (e) { scanPhoto(e.target.files && e.target.files[0]); });
+            // A „kamera" gomb az élő, folyamatos beolvasót nyitja (hands-free auto-lock).
+            openBtn.addEventListener('click', open);
+            closeBtn.addEventListener('click', close);
+            captureBtn.addEventListener('click', captureManual);
+            torchBtn.addEventListener('click', toggleTorch);
             photoBtn.addEventListener('click', function () { photoInput.click(); });
             photoInput.addEventListener('change', function (e) { scanPhoto(e.target.files && e.target.files[0]); });
             document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && active) close(); });
