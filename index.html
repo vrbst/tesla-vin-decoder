@@ -297,6 +297,7 @@
         <span id="photoBtnLabel">Beolvasás fotóból</span>
     </button>
     <input type="file" id="photoInput" accept="image/*" hidden>
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
     <button type="button" class="scan-btn install-btn" id="installBtn" hidden aria-label="Telepítés">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>
@@ -887,6 +888,7 @@
             var photoBtn = document.getElementById('photoBtn');
             var photoBtnLabel = document.getElementById('photoBtnLabel');
             var photoInput = document.getElementById('photoInput');
+            var cameraInput = document.getElementById('cameraInput');
 
             var stream = null, detector = null, barcodeTimer = null;
             var ocrWorker = null, ocrInit = null, ocrBusy = false, active = false, torchOn = false, videoTrack = null, imageCapture = null, acceptGuessNext = false;
@@ -1118,10 +1120,7 @@
             // előbb vonalkód, majd teljes oldalas OCR. Élesebb, mint az élő videó.
             async function scanPhoto(file) {
                 if (!file) return;
-                var u = t().ui;
-                photoBtn.disabled = true;
-                var prevLabel = photoBtnLabel.textContent;
-                photoBtnLabel.innerHTML = '<span class="spinner"></span>';
+                openBtn.disabled = true; photoBtn.disabled = true;
                 statusBar.innerHTML = '<span class="count">…</span> · ' + su().ocrWorking;
                 gauge.className = 'gauge';
                 try {
@@ -1171,8 +1170,8 @@
                     gauge.className = 'gauge bad';
                     statusBar.textContent = su().notFound;
                 } finally {
-                    photoBtn.disabled = false; photoBtnLabel.textContent = prevLabel || su().photo;
-                    photoInput.value = ''; // ugyanaz a fájl újra kiválasztható legyen
+                    openBtn.disabled = false; photoBtn.disabled = false;
+                    photoInput.value = ''; cameraInput.value = ''; // ugyanaz a fájl újra mehet
                 }
             }
 
@@ -1262,10 +1261,10 @@
                 try { input.focus(); } catch (e) {}
             }
 
-            openBtn.addEventListener('click', open);
-            closeBtn.addEventListener('click', close);
-            captureBtn.addEventListener('click', captureManual);
-            torchBtn.addEventListener('click', toggleTorch);
+            // A „kamera" gomb a telefon kamera-appját nyitja (éles, fókuszált fotó),
+            // és a megbízható fotós feldolgozót futtatja — nem reszelős élő videót.
+            openBtn.addEventListener('click', function () { cameraInput.click(); });
+            cameraInput.addEventListener('change', function (e) { scanPhoto(e.target.files && e.target.files[0]); });
             photoBtn.addEventListener('click', function () { photoInput.click(); });
             photoInput.addEventListener('change', function (e) { scanPhoto(e.target.files && e.target.files[0]); });
             document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && active) close(); });
