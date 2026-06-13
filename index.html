@@ -889,7 +889,7 @@
             var photoInput = document.getElementById('photoInput');
 
             var stream = null, detector = null, barcodeTimer = null;
-            var ocrWorker = null, ocrBusy = false, active = false, torchOn = false, videoTrack = null, forceGuess = false, imageCapture = null;
+            var ocrWorker = null, ocrInit = null, ocrBusy = false, active = false, torchOn = false, videoTrack = null, imageCapture = null;
             var TESS_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
             var VIN_CHARS = 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789';
             var TESLA_WMI = ['5YJ', '7SA', '7G2', 'LRW', 'XP7', 'SFZ'];
@@ -983,15 +983,20 @@
                 });
             }
 
-            async function ensureOcr() {
-                if (ocrWorker) return ocrWorker;
-                if (!window.Tesseract) { setHint('<b>' + su().ocrLoading + '</b>'); await loadScript(TESS_URL); }
-                ocrWorker = await Tesseract.createWorker('eng');
-                await ocrWorker.setParameters({
-                    tessedit_char_whitelist: VIN_CHARS,
-                    tessedit_pageseg_mode: '7' // alap: egyetlen szövegsor
-                });
-                return ocrWorker;
+            function ensureOcr() {
+                if (ocrWorker) return Promise.resolve(ocrWorker);
+                if (ocrInit) return ocrInit; // párhuzamos hívások egyetlen workert hozzanak létre
+                ocrInit = (async function () {
+                    if (!window.Tesseract) { setHint('<b>' + su().ocrLoading + '</b>'); await loadScript(TESS_URL); }
+                    var w = await Tesseract.createWorker('eng');
+                    await w.setParameters({
+                        tessedit_char_whitelist: VIN_CHARS,
+                        tessedit_pageseg_mode: '7'
+                    });
+                    ocrWorker = w;
+                    return w;
+                })();
+                return ocrInit;
             }
             // psm 7 = egy sor (élő kamera-sáv), psm 3 = teljes oldal (fotó, körülötte más szöveg).
             async function ocrRecognize(image, psm) {
@@ -1029,45 +1034,6 @@
             }
 
             function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-
-            // Egy OCR-próba a kerethez igazított sávon. allowGuess=true esetén a legjobb
-            // tippet is elfogadja; a folyamatos hurok alapból csak érvényes VIN-re zár rá.
-            async function ocrOnce(allowGuess) {
-                if (ocrBusy || !active) return false;
-                ocrBusy = true;
-                try {
-                    var cv = captureFrame();
-                    if (!cv) return false;
-                    preprocess(cv.getContext('2d', { willReadFrequently: true }), cv.width, cv.height);
-                    var res = await ocrRecognize(cv, 3);
-                    var text = (res && res.data ? res.data.text : '') || '';
-                    var vin = findValidVin(text);
-                    if (vin) { accept(vin, true); return true; }
-                    if (allowGuess) {
-                        var guess = bestCandidate(text);
-                        if (guess) { accept(guess, false); return true; }
-                    }
-                    if (active) {
-                        var preview = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
-                        if (allowGuess) setHint(su().notFound + (preview ? ' · „<b>' + preview + '</b>…”' : ''), 'err');
-                        else setHint(su().hint + (preview ? '<br><span style="opacity:.75">… ' + preview + '</span>' : ''));
-                    }
-                    return false;
-                } catch (e) { return false; }
-                finally { ocrBusy = false; }
-            }
-
-            // Folyamatos OCR: addig próbálkozik képkockáról képkockára, amíg érvényes
-            // VIN-re rá nem zár (vagy amíg a gombbal el nem fogadjuk a pillanatnyi olvasatot).
-            async function ocrLoop() {
-                try { setHint('<b>' + su().ocrLoading + '</b>'); await ensureOcr(); } catch (e) { return; }
-                while (active) {
-                    var ag = forceGuess; forceGuess = false;
-                    var done = await ocrOnce(ag);
-                    if (done) return;
-                    await sleep(140);
-                }
-            }
 
             // Bittérkép vászonra, méretkorláttal.
             function bitmapToCanvas(bmp, maxW) {
@@ -1273,7 +1239,7 @@
                     try { if (videoTrack) await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
                     await setupDetector();
                     await setupTorch();
-                    ocrLoop(); // folyamatos OCR a háttérben (nem await-eljük)
+                    ensureOcr().catch(function () {}); // felismerő előtöltése (a gomb legyen gyors)
                 } catch (e) {
                     var name = e && e.name ? e.name : '';
                     if (!window.isSecureContext) setHint('<b>' + su().insecure + '</b>', 'err');
@@ -1291,6 +1257,7 @@
                 video.srcObject = null;
                 overlay.hidden = true;
                 if (ocrWorker) { try { ocrWorker.terminate(); } catch (e) {} ocrWorker = null; }
+                ocrInit = null;
                 try { input.focus(); } catch (e) {}
             }
 
