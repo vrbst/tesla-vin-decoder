@@ -390,13 +390,13 @@
                     install: { button: 'Telepítés a kezdőképernyőre', iosHint: 'iPhone-on: Megosztás ▸ „Főképernyőhöz adás”.' },
                     scan: {
                         button: 'Beolvasás kamerával', photo: 'Beolvasás fotóból / galériából', title: 'VIN beolvasása',
-                        hint: 'Igazítsd a <b>VIN-t</b> a sávba, jó fényben, és nyomd meg a gombot',
-                        scanning: 'Vonalkód keresése…', capture: 'Beolvasás most (élesfotó)',
+                        hint: 'Igazítsd a <b>VIN-t</b> a sávba, jó fényben — magától beolvassa',
+                        scanning: 'Vonalkód keresése…', capture: 'Beolvasás most',
                         ocrLoading: 'Felismerő betöltése…', ocrWorking: 'Felismerés folyamatban…',
                         found: '✓ Megvan a VIN', foundUnverified: 'VIN beolvasva (ellenőrizd a számjegyet)',
                         notFound: 'Nem találtam érvényes VIN-t — próbáld közelebbről, jó fényben',
-                        sub: 'Tartsd a VIN-t a képbe, jó fényben, és nyomd meg a gombot egy éles felvételhez. A vonalkód automatikusan is beolvasódik.',
-                        subNoBarcode: 'Tartsd a VIN-t a képbe, jó fényben, és nyomd meg a gombot egy éles felvételhez.',
+                        sub: 'Tartsd a VIN-t a sávba — magától beolvassa. Ha nem sikerül, a gombbal elfogadhatod a látott olvasatot.',
+                        subNoBarcode: 'Tartsd a VIN-t a sávba — magától beolvassa. Ha nem sikerül, a gombbal elfogadhatod a látott olvasatot.',
                         noCamera: 'Nem érhető el a kamera ezen az eszközön.',
                         denied: 'Kamera-hozzáférés megtagadva. Engedélyezd a böngésző beállításaiban.',
                         insecure: 'A kamera csak HTTPS-en (vagy localhoston) működik.'
@@ -460,13 +460,13 @@
                     install: { button: 'Install to home screen', iosHint: 'On iPhone: Share ▸ “Add to Home Screen”.' },
                     scan: {
                         button: 'Scan with camera', photo: 'Scan from a photo / gallery', title: 'Scan VIN',
-                        hint: 'Line up the <b>VIN</b> in the band, good light, then press the button',
-                        scanning: 'Looking for a barcode…', capture: 'Scan now (sharp photo)',
+                        hint: 'Line up the <b>VIN</b> in the band, good light — it reads automatically',
+                        scanning: 'Looking for a barcode…', capture: 'Read now',
                         ocrLoading: 'Loading recognizer…', ocrWorking: 'Recognizing…',
                         found: '✓ VIN found', foundUnverified: 'VIN scanned (check the check digit)',
                         notFound: 'No valid VIN found — try closer, in good light',
-                        sub: 'Hold the VIN in view, good light, and press the button for a sharp shot. Barcodes are also read automatically.',
-                        subNoBarcode: 'Hold the VIN in view, good light, and press the button for a sharp shot.',
+                        sub: 'Hold the VIN in the band — it reads automatically. If it struggles, the button accepts the current read.',
+                        subNoBarcode: 'Hold the VIN in the band — it reads automatically. If it struggles, the button accepts the current read.',
                         noCamera: 'No camera available on this device.',
                         denied: 'Camera access denied. Enable it in your browser settings.',
                         insecure: 'The camera only works over HTTPS (or localhost).'
@@ -530,13 +530,13 @@
                     install: { button: 'Zum Startbildschirm hinzufügen', iosHint: 'Auf dem iPhone: Teilen ▸ „Zum Home-Bildschirm“.' },
                     scan: {
                         button: 'Mit Kamera scannen', photo: 'Aus Foto / Galerie scannen', title: 'VIN scannen',
-                        hint: 'Richte die <b>VIN</b> im Streifen aus, gutes Licht, dann Knopf drücken',
-                        scanning: 'Suche nach Barcode…', capture: 'Jetzt scannen (Standfoto)',
+                        hint: 'Richte die <b>VIN</b> im Streifen aus, gutes Licht — wird automatisch gelesen',
+                        scanning: 'Suche nach Barcode…', capture: 'Jetzt lesen',
                         ocrLoading: 'Erkennung wird geladen…', ocrWorking: 'Erkennung läuft…',
                         found: '✓ VIN gefunden', foundUnverified: 'VIN gescannt (Prüfziffer kontrollieren)',
                         notFound: 'Keine gültige VIN gefunden — näher, bei gutem Licht versuchen',
-                        sub: 'VIN ins Bild halten, gutes Licht, und den Knopf für ein scharfes Foto drücken. Barcodes werden auch automatisch gelesen.',
-                        subNoBarcode: 'VIN ins Bild halten, gutes Licht, und den Knopf für ein scharfes Foto drücken.',
+                        sub: 'VIN im Streifen halten — wird automatisch gelesen. Notfalls übernimmt der Knopf die aktuelle Lesung.',
+                        subNoBarcode: 'VIN im Streifen halten — wird automatisch gelesen. Notfalls übernimmt der Knopf die aktuelle Lesung.',
                         noCamera: 'Keine Kamera auf diesem Gerät verfügbar.',
                         denied: 'Kamerazugriff verweigert. In den Browsereinstellungen erlauben.',
                         insecure: 'Die Kamera funktioniert nur über HTTPS (oder localhost).'
@@ -889,7 +889,7 @@
             var photoInput = document.getElementById('photoInput');
 
             var stream = null, detector = null, barcodeTimer = null;
-            var ocrWorker = null, ocrInit = null, ocrBusy = false, active = false, torchOn = false, videoTrack = null, imageCapture = null;
+            var ocrWorker = null, ocrInit = null, ocrBusy = false, active = false, torchOn = false, videoTrack = null, imageCapture = null, acceptGuessNext = false;
             var TESS_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
             var VIN_CHARS = 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789';
             var TESLA_WMI = ['5YJ', '7SA', '7G2', 'LRW', 'XP7', 'SFZ'];
@@ -1070,48 +1070,48 @@
                 return '';
             }
 
-            // A gomb: több éles felvételt készít gyors egymásutánban, és az ELSŐT fogadja
-            // el, amelyik WMI-vel kezdődő, érvényes VIN-t ad — ez „átüti" a fókusz/csillogás
-            // ingadozást. Ha egyik sem érvényes, a legtöbbször előjött tippet adja.
-            async function captureManual() {
-                if (ocrBusy || !active) return;
+            // Egy automatikus OCR-próba a teljes képkockán. Érvényes VIN-re azonnal rázár;
+            // ha a gombbal „most" kértük, a legjobb tippet is elfogadja (érvénytelennel is).
+            async function scanFrameOnce() {
+                if (ocrBusy || !active) return false;
                 ocrBusy = true;
-                captureBtn.disabled = true;
-                var prevLabel = captureLabel.textContent;
-                var MAX = 4, candidates = {}, lastPreview = '';
                 try {
-                    await ensureOcr();
-                    for (var i = 1; i <= MAX && active; i++) {
-                        captureLabel.innerHTML = '<span class="spinner"></span>';
-                        setHint('<b>' + su().ocrWorking + '</b> (' + i + '/' + MAX + ')');
-                        var cv = await grabStillCanvas();
-                        if (!cv) { await sleep(120); continue; }
-                        if (i === 1) { // vonalkód az első éles képen (teljes kép)
-                            var raw = await detectBarcodeOnCanvas(cv);
-                            var vinBc = findValidVin(raw); if (vinBc) { accept(vinBc, true); return; }
-                            var looseBc = findVinLoose(raw); if (looseBc) { accept(looseBc, false); return; }
-                        }
-                        preprocess(cv.getContext('2d', { willReadFrequently: true }), cv.width, cv.height);
-                        var res = await ocrRecognize(cv, 3);
-                        var text = (res && res.data ? res.data.text : '') || '';
-                        var vin = findValidVin(text);
-                        if (vin) { accept(vin, true); return; }
+                    var cv = captureFrame();
+                    if (!cv) return false;
+                    preprocess(cv.getContext('2d', { willReadFrequently: true }), cv.width, cv.height);
+                    var res = await ocrRecognize(cv, 3);
+                    var text = (res && res.data ? res.data.text : '') || '';
+                    var vin = findValidVin(text);
+                    if (vin) { accept(vin, true); return true; }
+                    var preview = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+                    if (acceptGuessNext) {
+                        acceptGuessNext = false;
                         var g = bestCandidate(text);
-                        if (g) candidates[g] = (candidates[g] || 0) + 1;
-                        lastPreview = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 22);
-                        await sleep(170);
+                        if (g) { accept(g, false); return true; }
+                        if (active) setHint(su().notFound + (preview ? ' · „<b>' + preview + '</b>…”' : ''), 'err');
+                        return false;
                     }
-                    // nincs érvényes — a leggyakoribb tipp
-                    var best = null, bestN = 0;
-                    for (var k in candidates) { if (candidates[k] > bestN) { bestN = candidates[k]; best = k; } }
-                    if (best) { accept(best, false); return; }
-                    setHint(su().notFound + (lastPreview ? ' · „<b>' + lastPreview + '</b>…”' : ''), 'err');
-                } catch (e) {
-                    setHint(su().notFound, 'err');
-                } finally {
-                    ocrBusy = false;
-                    if (active) { captureBtn.disabled = false; captureLabel.textContent = prevLabel || su().capture; }
+                    if (active) setHint(su().hint + (preview ? '<br><span style="opacity:.75">… ' + preview + '</span>' : ''));
+                    return false;
+                } catch (e) { return false; }
+                finally { ocrBusy = false; }
+            }
+
+            // Folyamatos, hands-free olvasás: addig próbálkozik, amíg rá nem zár.
+            async function scanLoop() {
+                try { await ensureOcr(); } catch (e) { return; }
+                while (active) {
+                    var done = await scanFrameOnce();
+                    if (done) return;
+                    await sleep(80);
                 }
+            }
+
+            // A gomb: a következő képkockán a látott olvasatot fogadtatja el (vésztartalék).
+            function captureManual() {
+                if (!active) return;
+                acceptGuessNext = true;
+                setHint('<b>' + su().ocrWorking + '</b>');
             }
 
             // Kép (fotó/galéria) feldolgozása az overlay nélkül: teljes felbontás,
@@ -1237,9 +1237,10 @@
                     await video.play().catch(function () {});
                     // Folyamatos autofókusz, ha az eszköz támogatja (élesebb szöveg).
                     try { if (videoTrack) await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
-                    await setupDetector();
                     await setupTorch();
-                    ensureOcr().catch(function () {}); // felismerő előtöltése (a gomb legyen gyors)
+                    await setupDetector();
+                    acceptGuessNext = false;
+                    scanLoop(); // folyamatos, hands-free OCR (nem await-eljük)
                 } catch (e) {
                     var name = e && e.name ? e.name : '';
                     if (!window.isSecureContext) setHint('<b>' + su().insecure + '</b>', 'err');
