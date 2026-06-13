@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesla Master VIN Decoder v6</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Montserrat:wght@300;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* tesla.com világos dizájnnyelv */
+            --ink: #171a20;
+            --ink-2: #393c41;
+            --ink-3: #5c5e62;
+            --line: rgba(0,0,0,0.10);
+            --line-soft: rgba(0,0,0,0.055);
+            --surface: #ffffff;
+            --surface-2: #f4f4f4;
+            --tesla-red: #e82127;
+            --charge: #1a8f3c;
+            --display: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            --body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: var(--body);
+            background: radial-gradient(85% 60% at 50% 14%, #ffffff 0%, #e8e9eb 100%) fixed;
+            color: var(--ink);
+            margin: 0; min-height: 100vh;
+            display: flex; justify-content: center; align-items: flex-start;
+            padding: 56px 20px;
+            -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+        }
+        .container { width: 100%; max-width: 880px; }
+
+        /* Fejléc */
+        .brand { text-align: center; margin-bottom: 28px; }
+        .brand .emblem { width: 42px; height: auto; display: block; margin: 0 auto 16px; }
+        .brand .emblem path { fill: var(--tesla-red); }
+        .wordmark {
+            margin: 0; font-family: var(--display); font-weight: 600;
+            font-size: clamp(1.3rem, 4vw, 1.9rem); letter-spacing: 0.42em;
+            text-transform: uppercase; color: var(--ink); padding-left: 0.42em;
+        }
+        .eyebrow {
+            margin: 11px 0 0; font-family: var(--display); font-weight: 500;
+            font-size: 0.7rem; letter-spacing: 0.34em; text-transform: uppercase;
+            color: var(--ink-3); padding-left: 0.34em;
+        }
+
+        /* VIN mező */
+        .vin-field { position: relative; }
+        input[type="text"] {
+            width: 100%; padding: 19px 18px;
+            font-family: var(--body); font-size: clamp(18px, 4.2vw, 23px); font-weight: 500;
+            border-radius: 10px; border: 1px solid var(--line);
+            background: var(--surface); color: var(--ink);
+            text-transform: uppercase; outline: none;
+            letter-spacing: 0.32em; text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            transition: border-color .18s ease, box-shadow .18s ease;
+        }
+        input[type="text"]::placeholder { color: #a7a8ab; letter-spacing: 0.14em; font-weight: 400; }
+        input[type="text"]:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(23,26,32,0.10); }
+
+        /* Töltöttség-sáv */
+        .gauge { margin-top: 14px; }
+        .gauge-track { height: 6px; border-radius: 99px; background: #e3e4e6; overflow: hidden; }
+        .gauge-fill {
+            height: 100%; width: 0%; border-radius: 99px; background: var(--ink);
+            transition: width .28s cubic-bezier(.2,.7,.2,1), background .25s ease;
+        }
+        .gauge.ok .gauge-fill { background: var(--charge); }
+        .gauge.bad .gauge-fill { background: var(--tesla-red); }
+        .gauge-label {
+            margin-top: 10px; font-size: 12.5px; line-height: 1.5; text-align: center;
+            color: var(--ink-3); letter-spacing: 0.2px; min-height: 1.2em;
+        }
+        .gauge-label .count { font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: 1.5px; color: var(--ink-2); }
+        .gauge.ok .gauge-label, .gauge.ok .gauge-label .count { color: var(--charge); }
+        .gauge.bad .gauge-label, .gauge.bad .gauge-label .count { color: var(--tesla-red); }
+
+        /* Eredmény-rács */
+        .results {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 14px; margin-top: 36px;
+        }
+        .full-width { grid-column: 1 / -1; }
+
+        /* Hero cím (a típus) – tesla.com "A Model 3 felfedezése" stílus */
+        .hero-title {
+            margin: 0 0 6px; text-align: center;
+            font-family: var(--display); font-weight: 600;
+            font-size: clamp(1.8rem, 5.5vw, 2.7rem); letter-spacing: -0.01em; color: var(--ink);
+        }
+        .hero-title small { font-size: 0.5em; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
+
+        /* Stat-sor – nagy szám + apró címke, vékony elválasztókkal */
+        .stats { display: flex; justify-content: center; flex-wrap: wrap; gap: 0; margin: 8px 0 14px; }
+        .stat { display: flex; flex-direction: column; align-items: center; padding: 4px 28px; position: relative; }
+        .stat + .stat::before {
+            content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+            width: 1px; height: 38px; background: var(--line);
+        }
+        .stat-val { font-family: var(--display); font-weight: 600; font-size: clamp(1.5rem, 4vw, 2rem); color: var(--ink); line-height: 1.1; }
+        .stat-label { margin-top: 5px; font-size: 11px; color: var(--ink-3); letter-spacing: 0.04em; }
+
+        /* Kártyák (világos, lágy árnyék) */
+        .card {
+            background: var(--surface); padding: 18px 20px; border-radius: 10px;
+            border: 1px solid var(--line-soft); box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+            transition: box-shadow .18s ease, transform .18s ease;
+        }
+        .card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.08); transform: translateY(-1px); }
+        .card h3 {
+            margin: 0 0 7px; font-family: var(--display); font-size: 10px;
+            color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 600;
+        }
+        .card p { margin: 0; font-size: 15px; font-weight: 400; color: var(--ink); line-height: 1.4; }
+        .card p small { color: var(--ink-3); font-size: 12px; }
+
+        /* carVertical CTA */
+        .cta {
+            grid-column: 1 / -1; margin-top: 8px; padding: 28px; border-radius: 14px;
+            background: var(--surface-2); border: 1px solid var(--line-soft); text-align: center;
+        }
+        .cta h3 { margin: 0 0 8px; font-family: var(--display); font-size: 17px; font-weight: 600; color: var(--ink); }
+        .cta p { margin: 0 auto 20px; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); max-width: 560px; }
+        .cta-btn {
+            display: inline-block; background: var(--ink); color: #fff; text-decoration: none;
+            font-family: var(--display); font-size: 14px; font-weight: 600; padding: 14px 32px;
+            border-radius: 100px; letter-spacing: 0.01em;
+            transition: background .15s ease, transform .12s ease, box-shadow .15s ease;
+        }
+        .cta-btn:hover { background: #000; transform: translateY(-1px); box-shadow: 0 10px 26px rgba(0,0,0,0.18); }
+        .cta-disclosure { margin: 14px auto 0; font-size: 11px; color: #8a8b8e; letter-spacing: 0.1px; line-height: 1.5; max-width: 560px; }
+
+        .placeholder-text {
+            text-align: center; color: #9a9b9e; width: 100%; font-size: 13px;
+            letter-spacing: 0.14em; grid-column: 1 / -1; padding: 30px 0;
+        }
+
+        /* Nyelvváltó (jobb felül) */
+        .lang-switch {
+            position: fixed; top: 18px; right: 18px; z-index: 20;
+            display: inline-flex; padding: 3px; gap: 2px;
+            background: var(--surface-2); border: 1px solid var(--line-soft);
+            border-radius: 100px; box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+        }
+        .lang-btn {
+            -webkit-appearance: none; appearance: none; border: 0; background: transparent; cursor: pointer;
+            font-family: var(--display); font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+            color: var(--ink-3); padding: 7px 13px; border-radius: 100px;
+            transition: background .15s ease, color .15s ease;
+        }
+        .lang-btn:hover { color: var(--ink); }
+        .lang-btn.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+
+        /* Hozzáférhetőség / mobil */
+        :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+        @media (max-width: 560px) {
+            body { padding: 30px 14px; }
+            .results { grid-template-columns: 1fr; gap: 12px; }
+            .stat { padding: 4px 16px; }
+            .stat + .stat::before { display: none; }
+            .wordmark { letter-spacing: 0.3em; padding-left: 0.3em; }
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    </style>
+</head>
+<body>
+<div class="lang-switch" role="group" aria-label="Nyelv / Language">
+    <button type="button" class="lang-btn active" data-lang="hu" aria-pressed="true">HU</button>
+    <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+    <button type="button" class="lang-btn" data-lang="de" aria-pressed="false">DE</button>
+</div>
+<div class="container">
+    <div class="brand">
+        <svg class="emblem" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M53 8 H67 L64 26 H56 Z"/>
+            <path d="M12 26 H108 L100 40 H20 Z"/>
+            <path d="M52 40 H68 L64 104 H56 Z"/>
+        </svg>
+        <h1 class="wordmark">Tesla</h1>
+        <p class="eyebrow" id="eyebrow">VIN Dekódoló</p>
+    </div>
+    <div class="vin-field">
+        <input type="text" id="vinInput" maxlength="17" placeholder="ÍRD BE A VIN-SZÁMOT" autocomplete="off" autofocus aria-label="VIN szám">
+    </div>
+    <div class="gauge" id="gauge">
+        <div class="gauge-track"><div class="gauge-fill" id="gaugeFill"></div></div>
+        <div class="gauge-label" id="statusBar"><span class="count">0 / 17</span></div>
+    </div>
+    <div class="results" id="resultsGrid"></div>
+</div>
+
+<script>
+    window.addEventListener('DOMContentLoaded', function () {
+
+        // ===================== CARVERTICAL CTA BEÁLLÍTÁS / CONFIG =====================
+        // Ide jön az affiliate-linked; a {VIN} tokent a 17 jegyű VIN váltja ki.
+        // Pl.: 'https://www.carvertical.com/hu/pricing?voucher=KODOD&vin={VIN}'
+        var CARVERTICAL_REFERRAL_URL = 'https://www.carvertical.com/hu/';
+        // =============================================================================
+        function carverticalLink(vin) {
+            var url = CARVERTICAL_REFERRAL_URL;
+            if (url.indexOf('{VIN}') !== -1) {
+                url = url.replace('{VIN}', encodeURIComponent(vin && vin.length === 17 ? vin : ''));
+            }
+            return url;
+        }
+
+        var LANG = 'hu';
+        var DEFAULT_LANG = 'en'; // ismeretlen böngészőnyelvnél erre esik vissza
+
+        // Nyelvfüggetlen táblák (modell-nevek, évjáratok)
+        var SHARED = {
+            model: { 'S':'Model S', 'X':'Model X', '3':'Model 3', 'Y':'Model Y', 'C':'Cybertruck', 'T':'Tesla Semi', 'R':'Roadster' },
+            year: {
+                'C':'2012','D':'2013','E':'2014','F':'2015','G':'2016','H':'2017','J':'2018','K':'2019','L':'2020',
+                'M':'2021','N':'2022','P':'2023','R':'2024','S':'2025','T':'2026','V':'2027','W':'2028','X':'2029','Y':'2030'
+            }
+        };
+
+        var TR = {
+            hu: {
+                ui: {
+                    eyebrow: 'VIN Dekódoló', inputPlaceholder: 'ÍRD BE A VIN-SZÁMOT', inputAria: 'VIN szám',
+                    placeholder: 'ÍRJ BE EGY VIN-SZÁMOT A DEKÓDOLÁSHOZ...', waiting: 'Várakozás...',
+                    keepTyping: 'folytasd a beírást…', badChar: 'érvénytelen karakter',
+                    badCharHint: '(I, O, Q nem szerepel VIN-ben — gyakran 1/0 elgépelése)',
+                    validVin: 'érvényes VIN — az ellenőrző számjegy', validVinTail: 'egyezik',
+                    invalidCheck1: 'az ellenőrző számjegy nem egyezik (beírt:', invalidCheck2: 'számított:',
+                    invalidCheckTail: ') — elgépelt vagy hamis VIN', serialPos: 'a 12. jegy',
+                    cards: { wmi:'Gyártó / Régió (1–3)', model:'Modell (4)', body:'Karosszéria (5)',
+                        restraint:'Biztonság / Ülések (6)', fuel:'Akku / Töltés / Üzemanyag (7)', motor:'Meghajtás / Motor (8)',
+                        check:'Ellenőrző számjegy (9)', year:'Évjárat (10)', plant:'Gyár (11)', serial:'Sorszám (12–17)' },
+                    checkNeed17:'(teljes 17 jegy kell az ellenőrzéshez)', checkNoVerify:'(nem ellenőrizhető – tiltott karakter)',
+                    checkOk:'✓ egyezik', checkExpected:'✗ várt:',
+                    stat: { year:'Évjárat', seats:'Ülés', drive:'Hajtás', plant:'Gyár' },
+                    cta: { h:'Teljes előzmény erről az autóról',
+                        p:'A VIN nem árulja el a kárelőzményt, a valós kilométert, a lopásstátuszt és a korábbi tulajdonosokat. Ezeket egy előzmény-riport mutatja meg — hivatalos nyilvántartásokból, biztosítói és szerviz-adatokból —, ami kifejezetten hasznos egy német import megvásárlása előtt.',
+                        btn:'Teljes előzmény-riport →',
+                        disc:'Affiliate link — ha rajta keresztül vásárolsz, minket támogatsz, és neked nem kerül többe. Fizetős, harmadik féltől származó szolgáltatás.' },
+                    wmiUnknown: function(w){ return 'Nem ismert Tesla gyártókód (' + w + ') — biztosan Tesla VIN?'; },
+                    modelUnknown: function(c){ return 'Ismeretlen típus (' + c + ')'; },
+                    yearUnknown: 'Ismeretlen évjárat', plantUnknown: function(c){ return 'Ismeretlen üzem (' + c + ')'; }
+                },
+                wmi: { '5YJ':'Tesla, USA – Fremont (személyautó: Model S / Model 3)', '7SA':'Tesla, USA – Fremont/Austin (MPV: Model X / Model Y)',
+                    '7G2':'Tesla, USA – Austin (haszongépjármű: Semi / Cybertruck)', 'LRW':'Tesla, Kína – Shanghai (Gigafactory 3)',
+                    'XP7':'Tesla, Németország – Berlin (Gigafactory 4)', 'SFZ':'Tesla, Egyesült Királyság (eredeti Roadster, Hethel)' },
+                restraint: { '1':'5 ülés (2 első + 3 hátsó öv) – első, térd és oldallégzsák, PODS','2':'Korai konfiguráció (2014 előtti)',
+                    '3':'4 ülés (2 első + 2 hátsó öv) – első, térd és oldallégzsák','4':'5 ülés (2 első + 3 hátsó öv) – első, térd és oldallégzsák',
+                    '5':'4 ülés (2 első + 2 hátsó öv) – első és oldallégzsák','6':'5 ülés (2 első + 3 hátsó öv) – első és oldallégzsák',
+                    '7':'5 ülés (2 első + 3 hátsó öv) – első és oldallégzsák + aktív motorháztető','8':'4 ülés (2 első + 2 hátsó öv) – első és oldallégzsák + aktív motorháztető' },
+                fuel: { 'A':'10 kW fedélzeti töltő (2012–2013)','B':'20 kW fedélzeti töltő (2012–2013)','C':'10 kW töltő + DC gyorstöltés (2012–2013)',
+                    'D':'20 kW töltő + DC gyorstöltés (2012–2013)','E':'Elektromos – jellemzően NMC/NCA lítium-ion','F':'Elektromos – LFP (lítium-vasfoszfát) akku',
+                    'H':'Nagy kapacitású lítium-ion (≈85 kWh)','S':'Standard kapacitású lítium-ion (≈60–70 kWh, NMC/NCA)','V':'Nagyon nagy kapacitású lítium-ion (≈90 kWh, NMC/NCA)' },
+                fuelEModern:'Elektromos (a pontos cellakémia VIN-ből nem biztos)', fuelCustom: function(c){ return 'Üzemanyag/akku kód: ' + c; },
+                motor: { '1':'Egymotoros (Standard, RWD)','2':'Kétmotoros (Standard AWD)','3':'Egymotoros Performance','4':'Kétmotoros Performance (AWD)',
+                    '5':'Kétmotoros Long Range / Palladium (Model S/X, 2021+)','6':'Hárommotoros Plaid (Model S/X)','A':'Egymotoros, RWD (Model 3)',
+                    'B':'Kétmotoros Standard (Model 3)','C':'Kétmotoros Performance (Model 3)','D':'Egymotoros, RWD (Model Y)','E':'Kétmotoros Standard (Model Y)',
+                    'F':'Kétmotoros Performance (Model Y)','J':'Egymotoros (hairpin tekercselés, RWD)','K':'Kétmotoros (hairpin tekercselés, AWD)',
+                    'L':'Performance motor (hairpin tekercselés)','R':'RWD V1 motor (korai hátsókerékhajtás)','N':'Kétmotoros AWD (Austin 4680 széria)',
+                    'S':'Hátsókerékhajtás (RWD, modern LFP)','0':'Régebbi kétmotoros / AWD' },
+                motorCustom: function(c){ return 'Egyedi/új típusú motorkód (' + c + ')'; },
+                plant: { '1':'Menlo Park, California (USA, korai)','3':'Hethel (Egyesült Királyság, Roadster)','A':'Austin, Texas (USA – Gigafactory 5)',
+                    'B':'Berlin (Németország – Gigafactory 4)','C':'Shanghai (Kína – Gigafactory 3)','F':'Fremont, California (USA)',
+                    'N':'Reno, Nevada (USA – Gigafactory 1)','P':'Palo Alto, California (USA, korai)' },
+                serialFirst: { 'A':'Alpha (korai elő-széria)','B':'Beta (korai elő-széria)','P':'Performance','S':'Signature (limitált kiadás)','F':'Founders (limitált kiadás)' },
+                serialNormal:'normál sorozatgyártás',
+                body: { shapeS:'5 ajtós hatchback (Model S)', shape3:'4 ajtós sedan (Model 3)', shapeSF:'5 ajtós hatchback / sedan', mpvX:'Class E MPV (Model X)',
+                    roadster:'kabrió (Roadster)', mpvY:'Class D MPV/SUV (Model Y)', pickup:'Crew Cab pickup (Cybertruck)',
+                    custom: function(c){ return 'Egyedi felépítmény (' + c + ')'; }, lhd:'BAL kormány', rhd:'JOBB kormány',
+                    semiShort:'Day Cab – rövid (Semi)', semiLong:'Day Cab – hosszú (Semi)', semiCab: function(c){ return 'Semi alváz/fülke (' + c + ')'; } },
+                rest: { a7:'7 üléses (3 soros: 2+3+2 öv) – első, térd és oldallégzsák, PODS', b6:'6 üléses (3 soros: 2+2+2 öv, kapitányülések) – első, térd és oldallégzsák, PODS',
+                    c5:'5 üléses (standard, 2 soros, EU-spec) – első és oldallégzsák, PODS', d5:'5 üléses (standard, 2 soros) – első, térd és oldallégzsák, PODS',
+                    one5:'5 üléses – első, térd és oldallégzsák, PODS', def: function(c){ return 'Biztonsági konfiguráció (' + c + ')'; },
+                    semiC8:'Class 8 (> 14 968 kg / 33 001 lb) – Semi', semiGvwr: function(c){ return 'Semi GVWR-osztály (' + c + ')'; } },
+                trim: { rwd:'(RWD)', srlr:'(SR vagy Long Range RWD — akkukódból nem dönthető el)', austin:'(4680, Austin)', stdRange:'(Standard Range)', early:'(korai, RWD)', cyb:'(altípus VIN-ből nem azonosítható)' }
+            },
+            en: {
+                ui: {
+                    eyebrow: 'VIN Decoder', inputPlaceholder: 'ENTER THE VIN', inputAria: 'VIN number',
+                    placeholder: 'ENTER A VIN TO DECODE...', waiting: 'Waiting...',
+                    keepTyping: 'keep typing…', badChar: 'invalid character',
+                    badCharHint: '(I, O, Q never appear in a VIN — often a typo for 1/0)',
+                    validVin: 'valid VIN — the check digit', validVinTail: 'matches',
+                    invalidCheck1: 'the check digit does not match (entered:', invalidCheck2: 'expected:',
+                    invalidCheckTail: ') — mistyped or fake VIN', serialPos: 'digit 12',
+                    cards: { wmi:'Manufacturer / Region (1–3)', model:'Model (4)', body:'Body (5)',
+                        restraint:'Safety / Seats (6)', fuel:'Battery / Charger / Fuel (7)', motor:'Drivetrain / Motor (8)',
+                        check:'Check digit (9)', year:'Model year (10)', plant:'Plant (11)', serial:'Serial (12–17)' },
+                    checkNeed17:'(needs all 17 digits to verify)', checkNoVerify:'(cannot verify – invalid character)',
+                    checkOk:'✓ matches', checkExpected:'✗ expected:',
+                    stat: { year:'Year', seats:'Seats', drive:'Drive', plant:'Plant' },
+                    cta: { h:'Full history of this car',
+                        p:'A VIN does not reveal the damage history, the real mileage, the theft status or previous owners. A history report shows these — from official registries, insurance and service data — which is especially useful before buying an imported car.',
+                        btn:'Full history report →',
+                        disc:'Affiliate link — buying through it supports us at no extra cost to you. A paid, third-party service.' },
+                    wmiUnknown: function(w){ return 'Unknown Tesla manufacturer code (' + w + ') — is this a Tesla VIN?'; },
+                    modelUnknown: function(c){ return 'Unknown type (' + c + ')'; },
+                    yearUnknown: 'Unknown model year', plantUnknown: function(c){ return 'Unknown plant (' + c + ')'; }
+                },
+                wmi: { '5YJ':'Tesla, USA – Fremont (passenger: Model S / Model 3)', '7SA':'Tesla, USA – Fremont/Austin (MPV: Model X / Model Y)',
+                    '7G2':'Tesla, USA – Austin (commercial: Semi / Cybertruck)', 'LRW':'Tesla, China – Shanghai (Gigafactory 3)',
+                    'XP7':'Tesla, Germany – Berlin (Gigafactory 4)', 'SFZ':'Tesla, United Kingdom (original Roadster, Hethel)' },
+                restraint: { '1':'5 seats (2 front + 3 rear belts) – front, knee & side airbags, PODS','2':'Early configuration (pre-2014)',
+                    '3':'4 seats (2 front + 2 rear belts) – front, knee & side airbags','4':'5 seats (2 front + 3 rear belts) – front, knee & side airbags',
+                    '5':'4 seats (2 front + 2 rear belts) – front & side airbags','6':'5 seats (2 front + 3 rear belts) – front & side airbags',
+                    '7':'5 seats (2 front + 3 rear belts) – front & side airbags + active hood','8':'4 seats (2 front + 2 rear belts) – front & side airbags + active hood' },
+                fuel: { 'A':'10 kW onboard charger (2012–2013)','B':'20 kW onboard charger (2012–2013)','C':'10 kW charger + DC fast charging (2012–2013)',
+                    'D':'20 kW charger + DC fast charging (2012–2013)','E':'Electric – typically NMC/NCA lithium-ion','F':'Electric – LFP (lithium iron phosphate) battery',
+                    'H':'High-capacity lithium-ion (≈85 kWh)','S':'Standard-capacity lithium-ion (≈60–70 kWh, NMC/NCA)','V':'Very high-capacity lithium-ion (≈90 kWh, NMC/NCA)' },
+                fuelEModern:'Electric (exact cell chemistry not certain from the VIN)', fuelCustom: function(c){ return 'Fuel/battery code: ' + c; },
+                motor: { '1':'Single motor (Standard, RWD)','2':'Dual motor (Standard AWD)','3':'Single motor Performance','4':'Dual motor Performance (AWD)',
+                    '5':'Dual motor Long Range / Palladium (Model S/X, 2021+)','6':'Tri-motor Plaid (Model S/X)','A':'Single motor, RWD (Model 3)',
+                    'B':'Dual motor Standard (Model 3)','C':'Dual motor Performance (Model 3)','D':'Single motor, RWD (Model Y)','E':'Dual motor Standard (Model Y)',
+                    'F':'Dual motor Performance (Model Y)','J':'Single motor (hairpin winding, RWD)','K':'Dual motor (hairpin winding, AWD)',
+                    'L':'Performance motor (hairpin winding)','R':'RWD V1 motor (early rear-wheel drive)','N':'Dual motor AWD (Austin 4680 series)',
+                    'S':'Rear-wheel drive (RWD, modern LFP)','0':'Older dual motor / AWD' },
+                motorCustom: function(c){ return 'Custom/new motor code (' + c + ')'; },
+                plant: { '1':'Menlo Park, California (USA, early)','3':'Hethel (United Kingdom, Roadster)','A':'Austin, Texas (USA – Gigafactory 5)',
+                    'B':'Berlin (Germany – Gigafactory 4)','C':'Shanghai (China – Gigafactory 3)','F':'Fremont, California (USA)',
+                    'N':'Reno, Nevada (USA – Gigafactory 1)','P':'Palo Alto, California (USA, early)' },
+                serialFirst: { 'A':'Alpha (early pre-series)','B':'Beta (early pre-series)','P':'Performance','S':'Signature (limited edition)','F':'Founders (limited edition)' },
+                serialNormal:'standard production',
+                body: { shapeS:'5-door hatchback (Model S)', shape3:'4-door sedan (Model 3)', shapeSF:'5-door hatchback / sedan', mpvX:'Class E MPV (Model X)',
+                    roadster:'convertible (Roadster)', mpvY:'Class D MPV/SUV (Model Y)', pickup:'Crew Cab pickup (Cybertruck)',
+                    custom: function(c){ return 'Custom body (' + c + ')'; }, lhd:'left-hand drive', rhd:'right-hand drive',
+                    semiShort:'Day Cab – short (Semi)', semiLong:'Day Cab – long (Semi)', semiCab: function(c){ return 'Semi chassis/cab (' + c + ')'; } },
+                rest: { a7:'7 seats (3 rows: 2+3+2 belts) – front, knee & side airbags, PODS', b6:'6 seats (3 rows: 2+2+2 belts, captain seats) – front, knee & side airbags, PODS',
+                    c5:'5 seats (standard, 2 rows, EU-spec) – front & side airbags, PODS', d5:'5 seats (standard, 2 rows) – front, knee & side airbags, PODS',
+                    one5:'5 seats – front, knee & side airbags, PODS', def: function(c){ return 'Restraint configuration (' + c + ')'; },
+                    semiC8:'Class 8 (> 14,968 kg / 33,001 lb) – Semi', semiGvwr: function(c){ return 'Semi GVWR class (' + c + ')'; } },
+                trim: { rwd:'(RWD)', srlr:'(SR or Long Range RWD — not derivable from battery code)', austin:'(4680, Austin)', stdRange:'(Standard Range)', early:'(early, RWD)', cyb:'(sub-type not identifiable from VIN)' }
+            },
+            de: {
+                ui: {
+                    eyebrow: 'VIN-Decoder', inputPlaceholder: 'VIN EINGEBEN', inputAria: 'VIN-Nummer',
+                    placeholder: 'VIN ZUM DEKODIEREN EINGEBEN...', waiting: 'Warten...',
+                    keepTyping: 'weiter tippen…', badChar: 'ungültiges Zeichen',
+                    badCharHint: '(I, O, Q kommen in keiner VIN vor — oft ein Tippfehler für 1/0)',
+                    validVin: 'gültige VIN — die Prüfziffer', validVinTail: 'stimmt',
+                    invalidCheck1: 'die Prüfziffer stimmt nicht (eingegeben:', invalidCheck2: 'erwartet:',
+                    invalidCheckTail: ') — vertippt oder gefälschte VIN', serialPos: 'die 12. Stelle',
+                    cards: { wmi:'Hersteller / Region (1–3)', model:'Modell (4)', body:'Karosserie (5)',
+                        restraint:'Sicherheit / Sitze (6)', fuel:'Batterie / Laden / Kraftstoff (7)', motor:'Antrieb / Motor (8)',
+                        check:'Prüfziffer (9)', year:'Modelljahr (10)', plant:'Werk (11)', serial:'Seriennummer (12–17)' },
+                    checkNeed17:'(alle 17 Stellen nötig zur Prüfung)', checkNoVerify:'(nicht prüfbar – ungültiges Zeichen)',
+                    checkOk:'✓ stimmt', checkExpected:'✗ erwartet:',
+                    stat: { year:'Jahr', seats:'Sitze', drive:'Antrieb', plant:'Werk' },
+                    cta: { h:'Vollständige Historie dieses Fahrzeugs',
+                        p:'Eine VIN verrät weder die Schadenshistorie, den echten Kilometerstand, den Diebstahlstatus noch die Vorbesitzer. Ein Historienbericht zeigt diese — aus amtlichen Registern, Versicherungs- und Servicedaten — was besonders vor dem Kauf eines Importfahrzeugs nützlich ist.',
+                        btn:'Vollständiger Historienbericht →',
+                        disc:'Affiliate-Link — ein Kauf darüber unterstützt uns, ohne Mehrkosten für dich. Kostenpflichtiger Drittanbieter-Dienst.' },
+                    wmiUnknown: function(w){ return 'Unbekannter Tesla-Herstellercode (' + w + ') — ist das eine Tesla-VIN?'; },
+                    modelUnknown: function(c){ return 'Unbekannter Typ (' + c + ')'; },
+                    yearUnknown: 'Unbekanntes Modelljahr', plantUnknown: function(c){ return 'Unbekanntes Werk (' + c + ')'; }
+                },
+                wmi: { '5YJ':'Tesla, USA – Fremont (PKW: Model S / Model 3)', '7SA':'Tesla, USA – Fremont/Austin (MPV: Model X / Model Y)',
+                    '7G2':'Tesla, USA – Austin (Nutzfahrzeug: Semi / Cybertruck)', 'LRW':'Tesla, China – Shanghai (Gigafactory 3)',
+                    'XP7':'Tesla, Deutschland – Berlin (Gigafactory 4)', 'SFZ':'Tesla, Vereinigtes Königreich (originaler Roadster, Hethel)' },
+                restraint: { '1':'5 Sitze (2 vorne + 3 hinten Gurte) – Front-, Knie- & Seitenairbags, PODS','2':'Frühe Konfiguration (vor 2014)',
+                    '3':'4 Sitze (2 vorne + 2 hinten Gurte) – Front-, Knie- & Seitenairbags','4':'5 Sitze (2 vorne + 3 hinten Gurte) – Front-, Knie- & Seitenairbags',
+                    '5':'4 Sitze (2 vorne + 2 hinten Gurte) – Front- & Seitenairbags','6':'5 Sitze (2 vorne + 3 hinten Gurte) – Front- & Seitenairbags',
+                    '7':'5 Sitze (2 vorne + 3 hinten Gurte) – Front- & Seitenairbags + aktive Motorhaube','8':'4 Sitze (2 vorne + 2 hinten Gurte) – Front- & Seitenairbags + aktive Motorhaube' },
+                fuel: { 'A':'10-kW-Bordlader (2012–2013)','B':'20-kW-Bordlader (2012–2013)','C':'10-kW-Lader + DC-Schnellladen (2012–2013)',
+                    'D':'20-kW-Lader + DC-Schnellladen (2012–2013)','E':'Elektrisch – meist NMC/NCA-Lithium-Ionen','F':'Elektrisch – LFP (Lithium-Eisenphosphat)-Batterie',
+                    'H':'Hochkapazitäts-Lithium-Ionen (≈85 kWh)','S':'Standard-Lithium-Ionen (≈60–70 kWh, NMC/NCA)','V':'Sehr hohe Kapazität, Lithium-Ionen (≈90 kWh, NMC/NCA)' },
+                fuelEModern:'Elektrisch (genaue Zellchemie aus der VIN nicht sicher)', fuelCustom: function(c){ return 'Kraftstoff-/Batteriecode: ' + c; },
+                motor: { '1':'Einzelmotor (Standard, RWD)','2':'Doppelmotor (Standard AWD)','3':'Einzelmotor Performance','4':'Doppelmotor Performance (AWD)',
+                    '5':'Doppelmotor Long Range / Palladium (Model S/X, 2021+)','6':'Dreifachmotor Plaid (Model S/X)','A':'Einzelmotor, RWD (Model 3)',
+                    'B':'Doppelmotor Standard (Model 3)','C':'Doppelmotor Performance (Model 3)','D':'Einzelmotor, RWD (Model Y)','E':'Doppelmotor Standard (Model Y)',
+                    'F':'Doppelmotor Performance (Model Y)','J':'Einzelmotor (Hairpin-Wicklung, RWD)','K':'Doppelmotor (Hairpin-Wicklung, AWD)',
+                    'L':'Performance-Motor (Hairpin-Wicklung)','R':'RWD-V1-Motor (früher Heckantrieb)','N':'Doppelmotor AWD (Austin 4680-Serie)',
+                    'S':'Heckantrieb (RWD, modernes LFP)','0':'Älterer Doppelmotor / AWD' },
+                motorCustom: function(c){ return 'Eigener/neuer Motorcode (' + c + ')'; },
+                plant: { '1':'Menlo Park, Kalifornien (USA, früh)','3':'Hethel (Vereinigtes Königreich, Roadster)','A':'Austin, Texas (USA – Gigafactory 5)',
+                    'B':'Berlin (Deutschland – Gigafactory 4)','C':'Shanghai (China – Gigafactory 3)','F':'Fremont, Kalifornien (USA)',
+                    'N':'Reno, Nevada (USA – Gigafactory 1)','P':'Palo Alto, Kalifornien (USA, früh)' },
+                serialFirst: { 'A':'Alpha (frühe Vorserie)','B':'Beta (frühe Vorserie)','P':'Performance','S':'Signature (limitierte Auflage)','F':'Founders (limitierte Auflage)' },
+                serialNormal:'normale Serienproduktion',
+                body: { shapeS:'5-türiges Schrägheck (Model S)', shape3:'4-türige Limousine (Model 3)', shapeSF:'5-türiges Schrägheck / Limousine', mpvX:'Klasse-E-MPV (Model X)',
+                    roadster:'Cabrio (Roadster)', mpvY:'Klasse-D-MPV/SUV (Model Y)', pickup:'Crew-Cab-Pickup (Cybertruck)',
+                    custom: function(c){ return 'Eigene Karosserie (' + c + ')'; }, lhd:'Linkslenker', rhd:'Rechtslenker',
+                    semiShort:'Day Cab – kurz (Semi)', semiLong:'Day Cab – lang (Semi)', semiCab: function(c){ return 'Semi-Fahrgestell/Kabine (' + c + ')'; } },
+                rest: { a7:'7 Sitze (3 Reihen: 2+3+2 Gurte) – Front-, Knie- & Seitenairbags, PODS', b6:'6 Sitze (3 Reihen: 2+2+2 Gurte, Einzelsitze) – Front-, Knie- & Seitenairbags, PODS',
+                    c5:'5 Sitze (Standard, 2 Reihen, EU-Spezifikation) – Front- & Seitenairbags, PODS', d5:'5 Sitze (Standard, 2 Reihen) – Front-, Knie- & Seitenairbags, PODS',
+                    one5:'5 Sitze – Front-, Knie- & Seitenairbags, PODS', def: function(c){ return 'Rückhaltesystem-Konfiguration (' + c + ')'; },
+                    semiC8:'Klasse 8 (> 14.968 kg / 33.001 lb) – Semi', semiGvwr: function(c){ return 'Semi GVWR-Klasse (' + c + ')'; } },
+                trim: { rwd:'(RWD)', srlr:'(SR oder Long Range RWD — aus dem Batteriecode nicht ableitbar)', austin:'(4680, Austin)', stdRange:'(Standard Range)', early:'(früh, RWD)', cyb:'(Untertyp aus der VIN nicht identifizierbar)' }
+            }
+        };
+
+        function t() { return TR[LANG]; }
+
+        // 9. pozíció: ellenőrző számjegy (ISO 3779)
+        function transliterate(c) {
+            if (c >= '0' && c <= '9') return c.charCodeAt(0) - 48;
+            var map = { A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8, J:1,K:2,L:3,M:4,N:5, P:7, R:9, S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9 };
+            return map.hasOwnProperty(c) ? map[c] : null;
+        }
+        var weights = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+        function computeCheckDigit(vin) {
+            if (vin.length !== 17) return null;
+            var sum = 0;
+            for (var i = 0; i < 17; i++) {
+                var v = transliterate(vin.charAt(i));
+                if (v === null) return null;
+                sum += v * weights[i];
+            }
+            var r = sum % 11;
+            return r === 10 ? 'X' : String(r);
+        }
+
+        function getBody(char, model) {
+            char = char.toUpperCase(); model = model.toUpperCase();
+            var b = t().body;
+            if (model === 'T') {
+                if (char === 'A') return b.semiShort;
+                if (char === 'B') return b.semiLong;
+                return b.semiCab(char);
+            }
+            if (char === 'J') return b.pickup;
+            var hand = ('BDFH'.indexOf(char) !== -1) ? b.rhd : b.lhd;
+            var shape;
+            switch (char) {
+                case 'A': case 'B': shape = (model === 'S') ? b.shapeS : (model === '3') ? b.shape3 : b.shapeSF; break;
+                case 'C': case 'D': shape = b.mpvX; break;
+                case 'E': shape = (model === 'R') ? b.roadster : b.shape3; break;
+                case 'F': shape = b.shape3; break;
+                case 'G': case 'H': shape = b.mpvY; break;
+                default: return b.custom(char);
+            }
+            return shape + ' – ' + hand;
+        }
+
+        function getRestraint(char, model) {
+            char = char.toUpperCase(); model = model.toUpperCase();
+            var r = t().rest;
+            if (model === 'T') { if (char === 'E') return r.semiC8; return r.semiGvwr(char); }
+            if (model === 'X' || model === 'Y') {
+                switch (char) {
+                    case 'A': return r.a7;
+                    case 'B': return r.b6;
+                    case 'C': return r.c5;
+                    case 'D': return r.d5;
+                    case '1': return r.one5;
+                    default:  return r.def(char);
+                }
+            }
+            return t().restraint[char] || r.def(char);
+        }
+
+        function getFuel(char, year) {
+            char = char.toUpperCase();
+            var T = t();
+            var base = T.fuel[char] || T.fuelCustom(char);
+            var yr = parseInt(year, 10);
+            if (char === 'E' && !isNaN(yr) && yr >= 2016) base = T.fuelEModern;
+            return base;
+        }
+
+        function getSerialNote(firstChar) {
+            firstChar = firstChar.toUpperCase();
+            var T = t();
+            if (T.serialFirst[firstChar]) return T.serialFirst[firstChar];
+            if (firstChar >= '0' && firstChar <= '9') return T.serialNormal;
+            return null;
+        }
+
+        function getTrim(model, fuel, motor) {
+            model = (model || '').toUpperCase(); fuel = (fuel || '').toUpperCase(); motor = (motor || '').toUpperCase();
+            if (!SHARED.model[model]) return null;
+            var lfp = (fuel === 'F');
+            var h = t().trim;
+            if (model === '3') {
+                if (motor === 'C' || motor === 'L') return 'Model 3 Performance';
+                if (motor === 'B' || motor === 'K') return 'Model 3 Long Range AWD';
+                if (motor === 'A' || motor === 'J') return lfp ? 'Model 3 Standard Range Plus <small>' + h.rwd + '</small>' : 'Model 3 RWD <small>' + h.srlr + '</small>';
+                return 'Model 3';
+            }
+            if (model === 'Y') {
+                if (motor === 'F' || motor === 'L') return 'Model Y Performance';
+                if (motor === 'E' || motor === 'K') return 'Model Y Long Range AWD';
+                if (motor === 'N') return 'Model Y Long Range AWD <small>' + h.austin + '</small>';
+                if (motor === 'D' || motor === 'J') return lfp ? 'Model Y RWD <small>' + h.stdRange + '</small>' : 'Model Y RWD';
+                return 'Model Y';
+            }
+            if (model === 'S') {
+                if (motor === '6') return 'Model S Plaid';
+                if (motor === '5') return 'Model S Long Range / Dual Motor';
+                if (motor === '4') return 'Model S Performance';
+                if (motor === '3') return 'Model S Performance <small>' + h.early + '</small>';
+                if (motor === '2') return 'Model S Dual Motor (AWD)';
+                if (motor === '1') return 'Model S <small>' + h.early + '</small>';
+                return 'Model S';
+            }
+            if (model === 'X') {
+                if (motor === '6') return 'Model X Plaid';
+                if (motor === '5') return 'Model X Long Range / Dual Motor';
+                if (motor === '4') return 'Model X Performance';
+                if (motor === '2') return 'Model X Dual Motor (AWD)';
+                return 'Model X';
+            }
+            if (model === 'C') return 'Cybertruck <small>' + h.cyb + '</small>';
+            if (model === 'R') return 'Roadster';
+            if (model === 'T') return 'Tesla Semi';
+            return SHARED.model[model];
+        }
+
+        function seatsFromRestraint(c, model) {
+            c = (c || '').toUpperCase(); model = (model || '').toUpperCase();
+            if (model === 'X' || model === 'Y') { if (c === 'A') return '7'; if (c === 'B') return '6'; return '5'; }
+            if ('358'.indexOf(c) !== -1) return '4';
+            return '5';
+        }
+        function driveShort(m) { m = (m || '').toUpperCase(); return (['1','3','A','D','J','R','S'].indexOf(m) !== -1) ? 'RWD' : 'AWD'; }
+        var PLANT_SHORT = { '1':'Fremont','3':'Hethel','A':'Austin','B':'Berlin','C':'Shanghai','F':'Fremont','N':'Reno','P':'Palo Alto' };
+        function plantShort(c) { return PLANT_SHORT[(c || '').toUpperCase()] || (c || '—'); }
+
+        var input = document.getElementById('vinInput');
+        var results = document.getElementById('resultsGrid');
+        var gauge = document.getElementById('gauge');
+        var gaugeFill = document.getElementById('gaugeFill');
+        var statusBar = document.getElementById('statusBar');
+        var eyebrowEl = document.getElementById('eyebrow');
+
+        function renderCard(title, value, isFull, extraClass) {
+            var cls = 'card' + (isFull ? ' full-width' : '') + (extraClass ? ' ' + extraClass : '');
+            return '<div class="' + cls + '"><h3>' + title + '</h3><p>' + value + '</p></div>';
+        }
+
+        function updateStatus(vin) {
+            var u = t().ui;
+            var len = vin.length;
+            var pct = Math.min(100, Math.round((len / 17) * 100));
+            gaugeFill.style.width = pct + '%';
+            gauge.className = 'gauge';
+            if (len === 0) { statusBar.innerHTML = '<span class="count">0 / 17</span>'; return; }
+            var badChars = (vin.match(/[IOQ]/g) || []);
+            if (badChars.length) {
+                gauge.className = 'gauge bad';
+                statusBar.innerHTML = '<span class="count">' + len + ' / 17</span> · ✗ ' + u.badChar + ': ' + badChars.join(', ') + ' ' + u.badCharHint;
+                return;
+            }
+            if (len < 17) { statusBar.innerHTML = '<span class="count">' + len + ' / 17</span> · ' + u.keepTyping; return; }
+            var expected = computeCheckDigit(vin);
+            var actual = vin.charAt(8);
+            if (expected !== null && expected === actual) {
+                gauge.className = 'gauge ok';
+                statusBar.innerHTML = '<span class="count">17 / 17</span> · ✓ ' + u.validVin + ' (' + actual + ') ' + u.validVinTail;
+            } else {
+                gauge.className = 'gauge bad';
+                statusBar.innerHTML = '<span class="count">17 / 17</span> · ✗ ' + u.invalidCheck1 + ' ' + actual + ', ' + u.invalidCheck2 + ' ' + (expected || '?') + u.invalidCheckTail;
+            }
+        }
+
+        function decode(vin) {
+            vin = vin.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            updateStatus(vin);
+            var u = t().ui;
+            var T = t();
+            if (vin.length === 0) { results.innerHTML = '<div class="placeholder-text">' + u.placeholder + '</div>'; return; }
+
+            var wmi = vin.substring(0, 3);
+            var model = vin.charAt(3);
+            var body = vin.charAt(4);
+            var restraint = vin.charAt(5);
+            var fuel = vin.charAt(6);
+            var motor = vin.charAt(7);
+            var check = vin.charAt(8);
+            var year = vin.charAt(9);
+            var plant = vin.charAt(10);
+            var serial = vin.substring(11, 17);
+            var yearText = year ? (SHARED.year[year] || u.yearUnknown) : u.waiting;
+            var html = '';
+
+            var trim = getTrim(model, fuel, motor);
+            if (trim) html += '<h2 class="hero-title full-width">' + trim + '</h2>';
+
+            if (vin.length === 17 && computeCheckDigit(vin) === vin.charAt(8)) {
+                html += '<div class="stats full-width">' +
+                    '<div class="stat"><span class="stat-val">' + yearText + '</span><span class="stat-label">' + u.stat.year + '</span></div>' +
+                    '<div class="stat"><span class="stat-val">' + seatsFromRestraint(restraint, model) + '</span><span class="stat-label">' + u.stat.seats + '</span></div>' +
+                    '<div class="stat"><span class="stat-val">' + driveShort(motor) + '</span><span class="stat-label">' + u.stat.drive + '</span></div>' +
+                    '<div class="stat"><span class="stat-val">' + plantShort(plant) + '</span><span class="stat-label">' + u.stat.plant + '</span></div>' +
+                '</div>';
+            }
+
+            html += renderCard(u.cards.wmi, wmi.length === 3 ? (T.wmi[wmi] || u.wmiUnknown(wmi)) : u.waiting, true);
+            html += renderCard(u.cards.model, model ? (SHARED.model[model] || u.modelUnknown(model)) : u.waiting);
+            html += renderCard(u.cards.body, body ? getBody(body, model) : u.waiting);
+            html += renderCard(u.cards.restraint, restraint ? getRestraint(restraint, model) : u.waiting);
+            html += renderCard(u.cards.fuel, fuel ? getFuel(fuel, yearText) : u.waiting);
+            html += renderCard(u.cards.motor, motor ? (T.motor[motor] || T.motorCustom(motor)) : u.waiting);
+
+            if (check) {
+                var exp = computeCheckDigit(vin);
+                var checkVal;
+                if (vin.length < 17) checkVal = check + ' <small>' + u.checkNeed17 + '</small>';
+                else if (exp === null) checkVal = check + ' <small>' + u.checkNoVerify + '</small>';
+                else if (exp === check) checkVal = check + ' <small>' + u.checkOk + '</small>';
+                else checkVal = check + ' <small>' + u.checkExpected + ' ' + exp + '</small>';
+                html += renderCard(u.cards.check, checkVal);
+            } else {
+                html += renderCard(u.cards.check, u.waiting);
+            }
+
+            html += renderCard(u.cards.year, yearText);
+            html += renderCard(u.cards.plant, plant ? (T.plant[plant] || u.plantUnknown(plant)) : u.waiting);
+
+            var serialVal;
+            if (serial.length > 0) {
+                serialVal = serial;
+                var sNote = getSerialNote(serial.charAt(0));
+                if (sNote && !(serial.charAt(0) >= '0' && serial.charAt(0) <= '9')) serialVal += ' <small>(' + u.serialPos + ': ' + sNote + ')</small>';
+            } else { serialVal = u.waiting; }
+            html += renderCard(u.cards.serial, serialVal, true);
+
+            if (vin.length === 17 && computeCheckDigit(vin) === vin.charAt(8)) {
+                var cvUrl = carverticalLink(vin);
+                html += '<div class="cta">' +
+                    '<h3>' + u.cta.h + '</h3>' +
+                    '<p>' + u.cta.p + '</p>' +
+                    '<a class="cta-btn" href="' + cvUrl + '" target="_blank" rel="noopener nofollow sponsored">' + u.cta.btn + '</a>' +
+                    '<p class="cta-disclosure">' + u.cta.disc + '</p>' +
+                '</div>';
+            }
+            results.innerHTML = html;
+        }
+
+        function setLang(lang) {
+            LANG = lang;
+            document.documentElement.lang = lang;
+            var u = t().ui;
+            input.placeholder = u.inputPlaceholder;
+            input.setAttribute('aria-label', u.inputAria);
+            if (eyebrowEl) eyebrowEl.textContent = u.eyebrow;
+            var btns = document.querySelectorAll('.lang-btn');
+            for (var i = 0; i < btns.length; i++) {
+                var on = btns[i].getAttribute('data-lang') === lang;
+                btns[i].classList.toggle('active', on);
+                btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+            }
+            decode(input.value);
+        }
+
+        // A böngésző nyelve alapján választ; a támogatott nyelveket a TR kulcsaiból veszi,
+        // így új nyelv hozzáadásakor ehhez nem kell hozzányúlni. Ismeretlennél: DEFAULT_LANG.
+        function detectLang() {
+            var supported = Object.keys(TR);
+            var prefs = (navigator.languages && navigator.languages.length) ? navigator.languages
+                        : [navigator.language || navigator.userLanguage || ''];
+            for (var i = 0; i < prefs.length; i++) {
+                var code = (prefs[i] || '').toLowerCase().split('-')[0];
+                if (supported.indexOf(code) !== -1) return code;
+            }
+            return DEFAULT_LANG;
+        }
+
+        var langBtns = document.querySelectorAll('.lang-btn');
+        for (var i = 0; i < langBtns.length; i++) {
+            langBtns[i].addEventListener('click', function () { setLang(this.getAttribute('data-lang')); });
+        }
+        if (input) { input.addEventListener('input', function (e) { decode(e.target.value); }); }
+        setLang(detectLang());
+    });
+</script>
+</body>
+</html>
