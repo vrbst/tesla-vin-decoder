@@ -88,6 +88,8 @@
         .scan-btn:active { transform: translateY(1px); }
         .scan-btn svg { width: 19px; height: 19px; display: block; }
         .scan-btn[hidden] { display: none; }
+        .install-btn { background: var(--ink); color: #fff; border-color: var(--ink); }
+        .install-btn:hover { background: #000; }
 
         /* Töltöttség-sáv */
         .gauge { margin-top: 14px; }
@@ -288,6 +290,12 @@
         </svg>
         <span id="scanBtnLabel">Beolvasás kamerával</span>
     </button>
+    <button type="button" class="scan-btn install-btn" id="installBtn" hidden aria-label="Telepítés">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>
+        </svg>
+        <span id="installBtnLabel">Telepítés a kezdőképernyőre</span>
+    </button>
     <div class="gauge" id="gauge">
         <div class="gauge-track"><div class="gauge-fill" id="gaugeFill"></div></div>
         <div class="gauge-label" id="statusBar" role="status" aria-live="polite"><span class="count">0 / 17</span></div>
@@ -372,6 +380,7 @@
                     wmiUnknown: function(w){ return 'Nem ismert Tesla gyártókód (' + w + ') — biztosan Tesla VIN?'; },
                     modelUnknown: function(c){ return 'Ismeretlen típus (' + c + ')'; },
                     yearUnknown: 'Ismeretlen évjárat', plantUnknown: function(c){ return 'Ismeretlen üzem (' + c + ')'; },
+                    install: { button: 'Telepítés a kezdőképernyőre', iosHint: 'iPhone-on: Megosztás ▸ „Főképernyőhöz adás”.' },
                     scan: {
                         button: 'Beolvasás kamerával', title: 'VIN beolvasása',
                         hint: 'Igazítsd a <b>VIN-t vagy a vonalkódot</b> a keretbe',
@@ -441,6 +450,7 @@
                     wmiUnknown: function(w){ return 'Unknown Tesla manufacturer code (' + w + ') — is this a Tesla VIN?'; },
                     modelUnknown: function(c){ return 'Unknown type (' + c + ')'; },
                     yearUnknown: 'Unknown model year', plantUnknown: function(c){ return 'Unknown plant (' + c + ')'; },
+                    install: { button: 'Install to home screen', iosHint: 'On iPhone: Share ▸ “Add to Home Screen”.' },
                     scan: {
                         button: 'Scan with camera', title: 'Scan VIN',
                         hint: 'Align the <b>VIN or barcode</b> inside the frame',
@@ -510,6 +520,7 @@
                     wmiUnknown: function(w){ return 'Unbekannter Tesla-Herstellercode (' + w + ') — ist das eine Tesla-VIN?'; },
                     modelUnknown: function(c){ return 'Unbekannter Typ (' + c + ')'; },
                     yearUnknown: 'Unbekanntes Modelljahr', plantUnknown: function(c){ return 'Unbekanntes Werk (' + c + ')'; },
+                    install: { button: 'Zum Startbildschirm hinzufügen', iosHint: 'Auf dem iPhone: Teilen ▸ „Zum Home-Bildschirm“.' },
                     scan: {
                         button: 'Mit Kamera scannen', title: 'VIN scannen',
                         hint: 'Richte die <b>VIN oder den Barcode</b> im Rahmen aus',
@@ -810,6 +821,8 @@
             document.getElementById('scanBtn').setAttribute('aria-label', u.scan.button);
             setText('scanTitle', u.scan.title);
             setText('scanCaptureLabel', u.scan.capture);
+            setText('installBtnLabel', u.install.button);
+            document.getElementById('installBtn').setAttribute('aria-label', u.install.button);
             var btns = document.querySelectorAll('.lang-btn');
             for (var i = 0; i < btns.length; i++) {
                 var on = btns[i].getAttribute('data-lang') === lang;
@@ -1051,6 +1064,39 @@
         })();
 
         setLang(detectLang());
+
+        // ===== Telepítés (PWA) =====
+        (function () {
+            var installBtn = document.getElementById('installBtn');
+            var deferred = null;
+            var standalone = window.matchMedia('(display-mode: standalone)').matches ||
+                             window.navigator.standalone === true;
+
+            // Android/Chromium: a böngésző felkínálja a telepítést — saját gombbal hozzuk elő.
+            window.addEventListener('beforeinstallprompt', function (e) {
+                e.preventDefault();
+                deferred = e;
+                if (!standalone) installBtn.hidden = false;
+            });
+
+            installBtn.addEventListener('click', async function () {
+                if (deferred) {
+                    installBtn.disabled = true;
+                    deferred.prompt();
+                    try { await deferred.userChoice; } catch (e) {}
+                    deferred = null; installBtn.disabled = false; installBtn.hidden = true;
+                } else {
+                    // iOS Safari nem ad beforeinstallprompt-ot — kézi útmutató.
+                    alert(t().ui.install.iosHint);
+                }
+            });
+
+            window.addEventListener('appinstalled', function () { installBtn.hidden = true; deferred = null; });
+
+            // iOS Safarin nincs natív prompt, de telepíthető a Megosztás menüből — mutassuk a gombot útmutatóval.
+            var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+            if (isIOS && !standalone) installBtn.hidden = false;
+        })();
 
         // Service worker (offline + telepíthetőség)
         if ('serviceWorker' in navigator) {
