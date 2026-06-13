@@ -898,21 +898,29 @@
             function su() { return t().ui.scan; }
             function setHint(html, cls) { hint.innerHTML = html; hint.className = 'scan-hint' + (cls ? ' ' + cls : ''); }
 
-            // 17-jegyű VIN-jelöltek kinyerése egy szövegből, ellenőrzőszámjegy-validálással.
+            // Egy 17-jegyű ablak érvényes-e (pontosan, vagy OCR-javítás után)?
+            function vinIsValid(c) {
+                if (!/[IOQ]/.test(c) && computeCheckDigit(c) === c.charAt(8)) return c;
+                var d = ocrCorrect(c);
+                if (computeCheckDigit(d) === d.charAt(8)) return d;
+                return null;
+            }
+            function startsWithWmi(c) {
+                for (var k = 0; k < TESLA_WMI.length; k++) { if (c.indexOf(TESLA_WMI[k]) === 0) return true; }
+                return false;
+            }
+            // Érvényes VIN keresése a szövegben. A Tesla-WMI-vel KEZDŐDŐ érvényes ablak
+            // elsőbbséget élvez — különben egy eltolt, véletlenül érvényes ellenőrzőszámjegyű
+            // ablak (pl. a „VIN" felirat beleolvasása: ...VNS5YJ3...) hamis találatot adna.
             function findValidVin(text) {
                 var s = (text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
                 if (s.length < 17) return null;
-                // 1) pontos egyezés (I/O/Q nélkül, helyes ellenőrzőszámjegy)
+                var anyValid = null;
                 for (var i = 0; i + 17 <= s.length; i++) {
-                    var c = s.substr(i, 17);
-                    if (!/[IOQ]/.test(c) && computeCheckDigit(c) === c.charAt(8)) return c;
+                    var v = vinIsValid(s.substr(i, 17));
+                    if (v) { if (startsWithWmi(v)) return v; if (!anyValid) anyValid = v; }
                 }
-                // 2) OCR-tipikus tévesztések javítása: I→1, O→0, Q→0
-                for (var j = 0; j + 17 <= s.length; j++) {
-                    var d = s.substr(j, 17).replace(/I/g, '1').replace(/O/g, '0').replace(/Q/g, '0');
-                    if (computeCheckDigit(d) === d.charAt(8)) return d;
-                }
-                return null;
+                return anyValid;
             }
             // Megbízható forrásnál (vonalkód) elfogadunk 17 jegyet érvénytelen ellenőrzőszámjeggyel is.
             function findVinLoose(text) {

@@ -1,4 +1,10 @@
 node_modules/
+# teszt-fotók a gyökérben (az ikonok az icons/ alatt maradnak)
+/*.avif
+/*.jpg
+/*.jpeg
+/*.heic
+/*.webp
 .DS_Store
 Thumbs.db
 *.log
