@@ -195,10 +195,10 @@
         #scanVideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
         .scan-mask { position: absolute; inset: 0; pointer-events: none; }
         .scan-frame {
-            position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%);
-            width: 86%; max-width: 460px; aspect-ratio: 4 / 3;
-            border: 2px solid rgba(255,255,255,0.92); border-radius: 16px;
-            box-shadow: 0 0 0 4000px rgba(0,0,0,0.34);
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            width: 88%; max-width: 560px; aspect-ratio: 6 / 1;
+            border: 2px solid rgba(255,255,255,0.92); border-radius: 12px;
+            box-shadow: 0 0 0 4000px rgba(0,0,0,0.46);
         }
         .scan-frame::before, .scan-frame::after,
         .scan-frame > i::before, .scan-frame > i::after {
@@ -390,7 +390,7 @@
                     install: { button: 'Telepítés a kezdőképernyőre', iosHint: 'iPhone-on: Megosztás ▸ „Főképernyőhöz adás”.' },
                     scan: {
                         button: 'Beolvasás kamerával', photo: 'Beolvasás fotóból / galériából', title: 'VIN beolvasása',
-                        hint: 'Tartsd a <b>VIN-t vagy a vonalkódot</b> a képbe, jó fényben',
+                        hint: 'Igazítsd a <b>VIN-t</b> a sávba, jó fényben, és nyomd meg a gombot',
                         scanning: 'Vonalkód keresése…', capture: 'Beolvasás most (élesfotó)',
                         ocrLoading: 'Felismerő betöltése…', ocrWorking: 'Felismerés folyamatban…',
                         found: '✓ Megvan a VIN', foundUnverified: 'VIN beolvasva (ellenőrizd a számjegyet)',
@@ -460,7 +460,7 @@
                     install: { button: 'Install to home screen', iosHint: 'On iPhone: Share ▸ “Add to Home Screen”.' },
                     scan: {
                         button: 'Scan with camera', photo: 'Scan from a photo / gallery', title: 'Scan VIN',
-                        hint: 'Keep the <b>VIN or barcode</b> in view, good light',
+                        hint: 'Line up the <b>VIN</b> in the band, good light, then press the button',
                         scanning: 'Looking for a barcode…', capture: 'Scan now (sharp photo)',
                         ocrLoading: 'Loading recognizer…', ocrWorking: 'Recognizing…',
                         found: '✓ VIN found', foundUnverified: 'VIN scanned (check the check digit)',
@@ -530,7 +530,7 @@
                     install: { button: 'Zum Startbildschirm hinzufügen', iosHint: 'Auf dem iPhone: Teilen ▸ „Zum Home-Bildschirm“.' },
                     scan: {
                         button: 'Mit Kamera scannen', photo: 'Aus Foto / Galerie scannen', title: 'VIN scannen',
-                        hint: 'Halte die <b>VIN oder den Barcode</b> ins Bild, gutes Licht',
+                        hint: 'Richte die <b>VIN</b> im Streifen aus, gutes Licht, dann Knopf drücken',
                         scanning: 'Suche nach Barcode…', capture: 'Jetzt scannen (Standfoto)',
                         ocrLoading: 'Erkennung wird geladen…', ocrWorking: 'Erkennung läuft…',
                         found: '✓ VIN gefunden', foundUnverified: 'VIN gescannt (Prüfziffer kontrollieren)',
@@ -909,6 +909,23 @@
                 for (var k = 0; k < TESLA_WMI.length; k++) { if (c.indexOf(TESLA_WMI[k]) === 0) return true; }
                 return false;
             }
+            // OCR-tévesztési osztályok (pl. 5↔S, 8↔B, 6↔G) — csak a WMI helyreállításához.
+            var CONF = [['0','O','Q','D'], ['1','I'], ['2','Z'], ['5','S'], ['6','G'], ['8','B'], ['7','T']];
+            function confClass(ch) { for (var i = 0; i < CONF.length; i++) { if (CONF[i].indexOf(ch) >= 0) return CONF[i]; } return null; }
+            function confusable(a, b) { if (a === b) return true; var g = confClass(a); return !!(g && g.indexOf(b) >= 0); }
+            // Ha a vezető 3 jegy egy ismert Tesla-WMI „tévesztett" változata (pl. SYJ→5YJ),
+            // állítsuk vissza — de CSAK akkor fogadjuk el, ha az ellenőrzőszámjegy stimmel,
+            // így nem ad hamis találatot.
+            function repairWmi(c) {
+                for (var i = 0; i < TESLA_WMI.length; i++) {
+                    var w = TESLA_WMI[i];
+                    if (confusable(c.charAt(0), w.charAt(0)) && confusable(c.charAt(1), w.charAt(1)) && confusable(c.charAt(2), w.charAt(2))) {
+                        var v = vinIsValid(w + c.substr(3));
+                        if (v) return v;
+                    }
+                }
+                return null;
+            }
             // Érvényes VIN keresése a szövegben. A Tesla-WMI-vel KEZDŐDŐ érvényes ablak
             // elsőbbséget élvez — különben egy eltolt, véletlenül érvényes ellenőrzőszámjegyű
             // ablak (pl. a „VIN" felirat beleolvasása: ...VNS5YJ3...) hamis találatot adna.
@@ -917,8 +934,11 @@
                 if (s.length < 17) return null;
                 var anyValid = null;
                 for (var i = 0; i + 17 <= s.length; i++) {
-                    var v = vinIsValid(s.substr(i, 17));
+                    var c = s.substr(i, 17);
+                    var v = vinIsValid(c);
                     if (v) { if (startsWithWmi(v)) return v; if (!anyValid) anyValid = v; }
+                    var r = repairWmi(c);
+                    if (r) return r;
                 }
                 return anyValid;
             }
@@ -1065,7 +1085,7 @@
                     try {
                         var blob = await imageCapture.takePhoto();
                         var bmp = await createImageBitmap(blob);
-                        return bitmapToCanvas(bmp, 2200);
+                        return bitmapToCanvas(bmp, 1800);
                     } catch (e) { /* esik vissza videó-képkockára */ }
                 }
                 return captureFrame();
@@ -1084,30 +1104,42 @@
                 return '';
             }
 
-            // A gomb: éles fényképet készít és a (működő) fotós pipeline-t futtatja rajta.
+            // A gomb: több éles felvételt készít gyors egymásutánban, és az ELSŐT fogadja
+            // el, amelyik WMI-vel kezdődő, érvényes VIN-t ad — ez „átüti" a fókusz/csillogás
+            // ingadozást. Ha egyik sem érvényes, a legtöbbször előjött tippet adja.
             async function captureManual() {
                 if (ocrBusy || !active) return;
                 ocrBusy = true;
                 captureBtn.disabled = true;
                 var prevLabel = captureLabel.textContent;
-                captureLabel.innerHTML = '<span class="spinner"></span>';
-                setHint('<b>' + su().ocrWorking + '</b>');
+                var MAX = 4, candidates = {}, lastPreview = '';
                 try {
                     await ensureOcr();
-                    var cv = await grabStillCanvas();
-                    if (!cv) { setHint(su().notFound, 'err'); return; }
-                    // 1) vonalkód az éles képen (előfeldolgozás előtt)
-                    var raw = await detectBarcodeOnCanvas(cv);
-                    var vinBc = findValidVin(raw); if (vinBc) { accept(vinBc, true); return; }
-                    var looseBc = findVinLoose(raw); if (looseBc) { accept(looseBc, false); return; }
-                    // 2) teljes oldalas OCR
-                    preprocess(cv.getContext('2d', { willReadFrequently: true }), cv.width, cv.height);
-                    var res = await ocrRecognize(cv, 3);
-                    var text = (res && res.data ? res.data.text : '') || '';
-                    var vin = findValidVin(text); if (vin) { accept(vin, true); return; }
-                    var guess = bestCandidate(text); if (guess) { accept(guess, false); return; }
-                    var preview = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 22);
-                    setHint(su().notFound + (preview ? ' · „<b>' + preview + '</b>…”' : ''), 'err');
+                    for (var i = 1; i <= MAX && active; i++) {
+                        captureLabel.innerHTML = '<span class="spinner"></span>';
+                        setHint('<b>' + su().ocrWorking + '</b> (' + i + '/' + MAX + ')');
+                        var cv = await grabStillCanvas();
+                        if (!cv) { await sleep(120); continue; }
+                        if (i === 1) { // vonalkód az első éles képen (teljes kép)
+                            var raw = await detectBarcodeOnCanvas(cv);
+                            var vinBc = findValidVin(raw); if (vinBc) { accept(vinBc, true); return; }
+                            var looseBc = findVinLoose(raw); if (looseBc) { accept(looseBc, false); return; }
+                        }
+                        preprocess(cv.getContext('2d', { willReadFrequently: true }), cv.width, cv.height);
+                        var res = await ocrRecognize(cv, 3);
+                        var text = (res && res.data ? res.data.text : '') || '';
+                        var vin = findValidVin(text);
+                        if (vin) { accept(vin, true); return; }
+                        var g = bestCandidate(text);
+                        if (g) candidates[g] = (candidates[g] || 0) + 1;
+                        lastPreview = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 22);
+                        await sleep(170);
+                    }
+                    // nincs érvényes — a leggyakoribb tipp
+                    var best = null, bestN = 0;
+                    for (var k in candidates) { if (candidates[k] > bestN) { bestN = candidates[k]; best = k; } }
+                    if (best) { accept(best, false); return; }
+                    setHint(su().notFound + (lastPreview ? ' · „<b>' + lastPreview + '</b>…”' : ''), 'err');
                 } catch (e) {
                     setHint(su().notFound, 'err');
                 } finally {
