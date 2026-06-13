@@ -934,15 +934,17 @@
             function findValidVin(text) {
                 var s = (text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
                 if (s.length < 17) return null;
-                var anyValid = null;
+                // CSAK Tesla-WMI-vel kezdődő (vagy javítható WMI-jű) érvényes ablak.
+                // Nincs „bármi érvényes" tartalék: az eltolt, véletlenül érvényes ablakok
+                // (pl. „...K170971KVNLRW3E") hamis találatot adnának.
                 for (var i = 0; i + 17 <= s.length; i++) {
                     var c = s.substr(i, 17);
                     var v = vinIsValid(c);
-                    if (v) { if (startsWithWmi(v)) return v; if (!anyValid) anyValid = v; }
+                    if (v && startsWithWmi(v)) return v;
                     var r = repairWmi(c);
                     if (r) return r;
                 }
-                return anyValid;
+                return null;
             }
             // Megbízható forrásnál (vonalkód) elfogadunk 17 jegyet érvénytelen ellenőrzőszámjeggyel is.
             function findVinLoose(text) {
@@ -1127,8 +1129,13 @@
                     var bmp;
                     try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
                     catch (e) { bmp = await createImageBitmap(file); }
-                    var maxSide = 2200;
-                    var sc = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+                    // Méretezés SZÉLESSÉG alapján (a vízszintes szöveg felbontása a fontos):
+                    // sosem nagyítunk, az álló screenshot szélességét nem zsugorítjuk feleslegesen.
+                    var maxW = 1600, maxSide = 4000;
+                    var sc = 1;
+                    if (bmp.width > maxW) sc = maxW / bmp.width;
+                    var longest = Math.max(bmp.width, bmp.height);
+                    if (longest * sc > maxSide) sc = maxSide / longest;
                     var w = Math.max(1, Math.round(bmp.width * sc)), h = Math.max(1, Math.round(bmp.height * sc));
                     canvas.width = w; canvas.height = h;
                     var ctx = canvas.getContext('2d', { willReadFrequently: true });

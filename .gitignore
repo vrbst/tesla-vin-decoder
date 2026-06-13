@@ -1,6 +1,7 @@
 node_modules/
 # teszt-fotók a gyökérben (az ikonok az icons/ alatt maradnak)
 /*.avif
+/*.png
 /*.jpg
 /*.jpeg
 /*.heic
