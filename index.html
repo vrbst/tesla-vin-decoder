@@ -880,6 +880,8 @@
             var ocrWorker = null, ocrBusy = false, active = false, torchOn = false, videoTrack = null;
             var TESS_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
             var VIN_CHARS = 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789';
+            var TESLA_WMI = ['5YJ', '7SA', '7G2', 'LRW', 'XP7', 'SFZ'];
+            function ocrCorrect(s) { return s.replace(/I/g, '1').replace(/O/g, '0').replace(/Q/g, '0'); }
 
             function su() { return t().ui.scan; }
             function setHint(html, cls) { hint.innerHTML = html; hint.className = 'scan-hint' + (cls ? ' ' + cls : ''); }
@@ -905,6 +907,20 @@
                 var s = (text || '').toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '');
                 var m = s.match(/[A-HJ-NPR-Z0-9]{17}/);
                 return m ? m[0] : null;
+            }
+            // Legjobb tipp érvénytelen ellenőrzőszámjegy esetén is: Tesla-WMI-vel kezdődő
+            // 17-es ablak, vagy ha az egész beolvasott szöveg pont 17 jegy. (OCR-javítással.)
+            function bestCandidate(text) {
+                var s = (text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                if (s.length < 17) return null;
+                for (var i = 0; i + 17 <= s.length; i++) {
+                    var c = ocrCorrect(s.substr(i, 17));
+                    for (var k = 0; k < TESLA_WMI.length; k++) {
+                        if (c.indexOf(TESLA_WMI[k]) === 0) return c;
+                    }
+                }
+                if (s.length === 17) return ocrCorrect(s);
+                return null;
             }
 
             function accept(vin, verified) {
@@ -939,15 +955,27 @@
             function gridToCanvas() {
                 var vw = video.videoWidth, vh = video.videoHeight;
                 if (!vw || !vh) return null;
-                var cropW = Math.round(vw * 0.9);
-                var cropH = Math.round(vh * 0.17);
+                var cropW = Math.round(vw * 0.94);
+                var cropH = Math.round(vh * 0.22);
                 var sx = Math.round((vw - cropW) / 2);
                 var sy = Math.round((vh - cropH) / 2);
                 var scaleUp = 2;
                 canvas.width = cropW * scaleUp;
                 canvas.height = cropH * scaleUp;
-                var ctx = canvas.getContext('2d');
+                var ctx = canvas.getContext('2d', { willReadFrequently: true });
                 ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
+                // Szürkeárnyalat + kontrasztnyújtás — segít a monitor csillogása / gyenge fény ellen.
+                try {
+                    var img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    var d = img.data;
+                    for (var i = 0; i < d.length; i += 4) {
+                        var g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+                        g = (g - 128) * 1.35 + 128;
+                        g = g < 0 ? 0 : g > 255 ? 255 : g;
+                        d[i] = d[i + 1] = d[i + 2] = g;
+                    }
+                    ctx.putImageData(img, 0, 0);
+                } catch (e) { /* getImageData tiltva? marad a nyers kép */ }
                 return canvas;
             }
 
@@ -963,9 +991,14 @@
                     var cv = gridToCanvas();
                     if (!cv) { setHint(su().notFound, 'err'); return; }
                     var res = await ocrWorker.recognize(cv);
-                    var vin = findValidVin(res && res.data ? res.data.text : '');
-                    if (vin) { accept(vin, true); }
-                    else { setHint(su().notFound, 'err'); }
+                    var rawText = (res && res.data ? res.data.text : '') || '';
+                    var vin = findValidVin(rawText);
+                    if (vin) { accept(vin, true); return; }
+                    var guess = bestCandidate(rawText);
+                    if (guess) { accept(guess, false); return; }
+                    // Semmi használható: mutassuk, mit olvasott be (diagnosztika).
+                    var preview = rawText.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 22);
+                    setHint(su().notFound + (preview ? ' · „<b>' + preview + '</b>…”' : ''), 'err');
                 } catch (e) {
                     setHint(su().notFound, 'err');
                 } finally {
