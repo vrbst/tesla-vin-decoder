@@ -2,7 +2,7 @@
  * App-shell precache (offline) + runtime cache a Tesseract OCR CDN-hez.
  * A verzió emelésével (CACHE) frissül a gyorsítótár.
  */
-const CACHE = 'tvd-v20';
+const CACHE = 'tvd-v21';
 const SHELL = [
   './',
   './index.html',

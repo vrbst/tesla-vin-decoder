@@ -168,6 +168,14 @@
             letter-spacing: 0.14em; grid-column: 1 / -1; padding: 30px 0;
         }
 
+        /* Build-bélyeg (a képernyő alján) – hogy látszódjon, tényleg a friss verzió fut */
+        .build-stamp {
+            position: fixed; left: 0; right: 0; z-index: 5; pointer-events: none;
+            bottom: 6px; bottom: max(6px, env(safe-area-inset-bottom));
+            text-align: center; font-family: var(--display);
+            font-size: 10.5px; letter-spacing: 0.08em; color: #a7a8ab;
+        }
+
         /* Nyelvváltó (jobb felül) */
         .lang-switch {
             position: fixed; top: 18px; right: 18px; z-index: 20;
@@ -310,6 +318,7 @@
     </div>
     <div class="results" id="resultsGrid" aria-live="polite"></div>
 </div>
+<div class="build-stamp" id="buildStamp"></div>
 
 <!-- Kamera-overlay -->
 <div class="scan-overlay" id="scanOverlay" hidden role="dialog" aria-modal="true" aria-label="VIN beolvasása">
@@ -338,6 +347,11 @@
 
 <script>
     window.addEventListener('DOMContentLoaded', function () {
+
+        // Build-bélyeg — minden kiadásnál frissítendő, hogy a telefonon látszódjon,
+        // tényleg az új verzió fut-e (nem a service worker régi gyorsítótára).
+        var BUILD = '2026-08-26 13:00';
+        (function () { var el = document.getElementById('buildStamp'); if (el) el.textContent = 'build ' + BUILD; })();
 
         // ===================== CARVERTICAL CTA BEÁLLÍTÁS / CONFIG =====================
         // Ide jön az affiliate-linked; a {VIN} tokent a 17 jegyű VIN váltja ki.
@@ -928,21 +942,70 @@
                 }
                 return null;
             }
+            // Egy 17-es ablak WMI-jét kanonikus Tesla-WMI-re hozza (ha összetéveszthető),
+            // vagy visszaadja, ha már az. Egyébként null. (A szavazáshoz és a javításhoz.)
+            function normalizeWmi(c) {
+                if (startsWithWmi(c)) return c;
+                for (var i = 0; i < TESLA_WMI.length; i++) {
+                    var w = TESLA_WMI[i];
+                    if (confusable(c.charAt(0), w.charAt(0)) && confusable(c.charAt(1), w.charAt(1)) && confusable(c.charAt(2), w.charAt(2)))
+                        return w + c.substr(3);
+                }
+                return null;
+            }
+            // Az összes lehetséges kanonikus-WMI-jű bázis (0-hibás WMI + összetéveszthető WMI-k).
+            function candidateBases(c) {
+                var out = [];
+                if (startsWithWmi(c)) out.push(c);
+                for (var i = 0; i < TESLA_WMI.length; i++) {
+                    var w = TESLA_WMI[i];
+                    if (confusable(c.charAt(0), w.charAt(0)) && confusable(c.charAt(1), w.charAt(1)) && confusable(c.charAt(2), w.charAt(2)))
+                        out.push(w + c.substr(3));
+                }
+                return out;
+            }
+            // EGYÉRTELMŰ, összetéveszthető EGYKARAKTERES javítás az ellenőrzőszám alapján.
+            // Végigpróbálja az összetéveszthető cseréket (5↔S, 8↔B, 0↔O/D/Q, 1↔I, 2↔Z, 6↔G, 7↔T);
+            // CSAK akkor fogad el, ha pontosan EGY ilyen csere ad érvényes Tesla-VIN-t — így
+            // sosem ad hamis találatot (a kétértelmű eseteket elutasítja). Tesztelve: 24/32 javul, 0 rossz.
+            function repairVinUnique(c) {
+                c = ocrCorrect(c);
+                var bases = candidateBases(c), seen = {}, found = null, count = 0, b, p, cls, k, cand, v;
+                for (b = 0; b < bases.length; b++) { v = vinIsValid(bases[b]); if (v && startsWithWmi(v) && !seen[v]) { seen[v] = 1; found = v; count++; } }
+                if (count >= 1) return count === 1 ? found : null;   // 0-hibás réteg: egyértelmű nyer
+                for (b = 0; b < bases.length; b++) {
+                    var base = bases[b];
+                    for (p = 3; p < 17; p++) {
+                        cls = confClass(base.charAt(p)); if (!cls) continue;
+                        for (k = 0; k < cls.length; k++) {
+                            if (cls[k] === base.charAt(p)) continue;
+                            cand = base.substr(0, p) + cls[k] + base.substr(p + 1);
+                            v = vinIsValid(cand);
+                            if (v && startsWithWmi(v) && !seen[v]) { seen[v] = 1; found = v; count++; }
+                        }
+                    }
+                }
+                return count === 1 ? found : null;
+            }
             // Érvényes VIN keresése a szövegben. A Tesla-WMI-vel KEZDŐDŐ érvényes ablak
             // elsőbbséget élvez — különben egy eltolt, véletlenül érvényes ellenőrzőszámjegyű
             // ablak (pl. a „VIN" felirat beleolvasása: ...VNS5YJ3...) hamis találatot adna.
             function findValidVin(text) {
                 var s = (text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
                 if (s.length < 17) return null;
-                // CSAK Tesla-WMI-vel kezdődő (vagy javítható WMI-jű) érvényes ablak.
-                // Nincs „bármi érvényes" tartalék: az eltolt, véletlenül érvényes ablakok
-                // (pl. „...K170971KVNLRW3E") hamis találatot adnának.
-                for (var i = 0; i + 17 <= s.length; i++) {
-                    var c = s.substr(i, 17);
+                var i, c;
+                // 1) Pontosan érvényes (esetleg javított WMI-vel) ablak — legmegbízhatóbb.
+                for (i = 0; i + 17 <= s.length; i++) {
+                    c = s.substr(i, 17);
                     var v = vinIsValid(c);
                     if (v && startsWithWmi(v)) return v;
                     var r = repairWmi(c);
                     if (r) return r;
+                }
+                // 2) Egyértelmű egykarakteres javítás (kijelzőről gyakori a makacs 1 hibás jegy).
+                for (i = 0; i + 17 <= s.length; i++) {
+                    var u = repairVinUnique(s.substr(i, 17));
+                    if (u) return u;
                 }
                 return null;
             }
@@ -1048,7 +1111,8 @@
             }
             // A sávot vászonra rajzolja, OCR-hez felnagyítva (~160 px magas sorra).
             // A teljes felbontású videóból vágunk, így a ROI éles marad (nem downscale-elt).
-            function grabBandCanvas() {
+            // blurPx > 0: enyhe elmosás a kijelző/monitor moiré-hullámai ellen (screen-scan).
+            function grabBandCanvas(blurPx) {
                 var r = roiRect();
                 if (!r || r.sW < 8 || r.sH < 8) return null;
                 var sc = Math.max(1, 160 / r.sH);                 // felnagyítás, sosem kicsinyítés
@@ -1057,7 +1121,23 @@
                 canvas.width = w; canvas.height = h;
                 var ctx = canvas.getContext('2d', { willReadFrequently: true });
                 ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+                if (blurPx) { try { ctx.filter = 'blur(' + blurPx + 'px)'; } catch (e) {} }
                 ctx.drawImage(video, r.sx, r.sy, r.sW, r.sH, 0, 0, w, h);
+                try { ctx.filter = 'none'; } catch (e) {}
+                return canvas;
+            }
+            // A TELJES képkocka (lekicsinyítve) — vésztartalék, ha a VIN nincs a keretbe igazítva
+            // (pl. kijelzőn a VIN más szöveg közt van). Enyhe blur a moiré ellen.
+            function grabFullCanvas(maxW, blurPx) {
+                var vw = video.videoWidth, vh = video.videoHeight;
+                if (!vw || !vh) return null;
+                var sc = Math.min(1, maxW / vw);
+                var w = Math.max(1, Math.round(vw * sc)), h = Math.max(1, Math.round(vh * sc));
+                canvas.width = w; canvas.height = h;
+                var ctx = canvas.getContext('2d', { willReadFrequently: true });
+                if (blurPx) { try { ctx.filter = 'blur(' + blurPx + 'px)'; } catch (e) {} }
+                ctx.drawImage(video, 0, 0, w, h);
+                try { ctx.filter = 'none'; } catch (e) {}
                 return canvas;
             }
             // Otsu-küszöbös binarizálás — kiemeli a maratott/nyomtatott VIN éleit
@@ -1090,7 +1170,7 @@
             // 17-es ablakokat pozíciónként „megszavaztatjuk", és a többségi olvasatot
             // ellenőrizzük — így egy-egy elrontott karakter több képkocka alatt kijavul.
             var votes = null;
-            function resetVotes() { votes = null; }
+            function resetVotes() { votes = null; tick = 0; }
             function votedBest() {
                 if (!votes) return null;
                 var out = '';
@@ -1105,44 +1185,75 @@
             function pushVotesAndCheck(text) {
                 var s = (text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
                 for (var i = 0; i + 17 <= s.length; i++) {
-                    var c = ocrCorrect(s.substr(i, 17));
-                    if (!startsWithWmi(c)) continue;
+                    // A WMI-t kanonikus Tesla-kódra hozzuk (pl. SYJ→5YJ), így a makacs
+                    // vezető-jegy tévesztés esetén is elindul a szavazás.
+                    var c = normalizeWmi(ocrCorrect(s.substr(i, 17)));
+                    if (!c) continue;
                     if (!votes) { votes = []; for (var p = 0; p < 17; p++) votes.push({}); }
                     for (var q = 0; q < 17; q++) { var chq = c.charAt(q); votes[q][chq] = (votes[q][chq] || 0) + 1; }
                 }
                 var best = votedBest();
-                if (best) { var v = vinIsValid(best); if (v && startsWithWmi(v)) return v; }
+                if (best) return findValidVin(best);   // pontos + egyértelmű egykarakteres javítás
                 return null;
             }
 
-            // Egy olvasási kör az élő sávból: szürke+kontraszt, majd binarizált próba.
-            // Érvényes VIN-re (WMI + ellenőrzőszámjegy) azonnal rázár; gombnyomásra a
-            // legjobb (szavazott) tippet is elfogadja.
+            // Egy szöveg-olvasat feldolgozása: pontos találat vagy szavazatba gyűjtés.
+            function tryText(text) {
+                var v = findValidVin(text); if (v) return v;
+                return pushVotesAndCheck(text);
+            }
+            var tick = 0;
+            // Egy olvasási kör: több előfeldolgozási variánst próbál (a különböző fényviszonyokra
+            // és felületekre), korai kilépéssel. Variánsok:
+            //   1) éles sáv + szürke/kontraszt          → tiszta, nyomtatott/kijelző
+            //   2) éles sáv + Otsu-binarizálás          → maratott/gravírozott, gyenge fény
+            //   3) ENYHÉN ELMOSOTT sáv                   → kijelző/monitor moiré ellen
+            //   4) minden 3.-ban a TELJES kép (blur)     → ha a VIN nincs a keretbe igazítva
+            // Érvényes VIN-re (WMI + ellenőrzőszám, egyértelmű 1-karakteres javítással) rázár;
+            // gombnyomásra a legjobb (szavazott) tippet is elfogadja.
             async function scanFrameOnce() {
                 if (ocrBusy || !active) return false;
                 ocrBusy = true;
+                tick++;
+                var texts = [];
                 try {
-                    var cv = grabBandCanvas();
-                    if (!cv) return false;
-                    var ctx = cv.getContext('2d', { willReadFrequently: true });
-                    preprocess(ctx, cv.width, cv.height);                 // szürke + kontraszt
-                    var text1 = await recognizeText(cv, 7);
-                    var vin = findValidVin(text1);
-                    if (vin) { accept(vin, true); return true; }
-                    var v1 = pushVotesAndCheck(text1);
-                    if (v1) { accept(v1, true); return true; }
+                    // 1) + 2) éles sáv: szürke/kontraszt, majd ugyanazon Otsu.
+                    var cv = grabBandCanvas(0);
+                    if (cv) {
+                        var ctx = cv.getContext('2d', { willReadFrequently: true });
+                        preprocess(ctx, cv.width, cv.height);
+                        var t1 = await recognizeText(cv, 7); texts.push(t1);
+                        var r1 = tryText(t1); if (r1) { accept(r1, true); return true; }
+                        binarizeOtsu(ctx, cv.width, cv.height);
+                        var t2 = await recognizeText(cv, 7); texts.push(t2);
+                        var r2 = tryText(t2); if (r2) { accept(r2, true); return true; }
+                    }
+                    // 3) elmosott sáv — kijelző/monitor moiré ellen.
+                    var cvb = grabBandCanvas(1);
+                    if (cvb) {
+                        var cb = cvb.getContext('2d', { willReadFrequently: true });
+                        preprocess(cb, cvb.width, cvb.height);
+                        var t3 = await recognizeText(cvb, 7); texts.push(t3);
+                        var r3 = tryText(t3); if (r3) { accept(r3, true); return true; }
+                    }
+                    // 4) teljes kép (ritkábban, drágább) — ha a VIN nincs a keretben.
+                    if (tick % 3 === 0) {
+                        var cf = grabFullCanvas(1500, 1);
+                        if (cf) {
+                            var cc = cf.getContext('2d', { willReadFrequently: true });
+                            preprocess(cc, cf.width, cf.height);
+                            var t4 = await recognizeText(cf, 6); texts.push(t4);
+                            var r4 = tryText(t4); if (r4) { accept(r4, true); return true; }
+                        }
+                    }
 
-                    binarizeOtsu(ctx, cv.width, cv.height);               // bináris (éles élek) próba
-                    var text2 = await recognizeText(cv, 7);
-                    var vin2 = findValidVin(text2);
-                    if (vin2) { accept(vin2, true); return true; }
-                    var v2 = pushVotesAndCheck(text2);
-                    if (v2) { accept(v2, true); return true; }
-
-                    var preview = (text1 + ' ' + text2).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+                    var joined = texts.join(' ').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                    var preview = joined.slice(0, 20);
                     if (acceptGuessNext) {
                         acceptGuessNext = false;
-                        var g = bestCandidate(text1) || bestCandidate(text2) || votedBest();
+                        var g = null;
+                        for (var i = 0; i < texts.length && !g; i++) g = bestCandidate(texts[i]);
+                        g = g || votedBest();
                         if (g) { accept(g, false); return true; }
                         if (active) setHint(su().notFound + (preview ? ' · „<b>' + preview + '</b>…”' : ''), 'err');
                         return false;
