@@ -1023,80 +1023,126 @@
                 } catch (e) { /* getImageData tiltva? marad a nyers kép */ }
             }
 
-            // A TELJES képkockát viszi vászonra (lekicsinyítve a sebességért) — ugyanúgy,
-            // ahogy a fotós ág, hogy a VIN-t ne kelljen pontosan a keretbe igazítani.
-            function captureFrame() {
-                var vw = video.videoWidth, vh = video.videoHeight;
-                if (!vw || !vh) return null;
-                var maxW = 1600;
-                var sc = Math.min(1, maxW / vw);
-                var w = Math.max(1, Math.round(vw * sc)), h = Math.max(1, Math.round(vh * sc));
-                canvas.width = w; canvas.height = h;
-                var ctx = canvas.getContext('2d', { willReadFrequently: true });
-                // Enyhe blur: kioltja a monitor/kijelző moiré-hullámait (különben a VIN olvashatatlan).
-                try { ctx.filter = 'blur(1px)'; } catch (e) {}
-                ctx.drawImage(video, 0, 0, w, h);
-                try { ctx.filter = 'none'; } catch (e) {}
-                return canvas; // a szürke/kontraszt előfeldolgozást a hívó végzi
-            }
-
             function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
-            // Bittérkép vászonra, méretkorláttal + moiré-elnyomó blur.
-            function bitmapToCanvas(bmp, maxW) {
-                var sc = Math.min(1, maxW / bmp.width);
-                var w = Math.max(1, Math.round(bmp.width * sc)), h = Math.max(1, Math.round(bmp.height * sc));
+            // ---- Vezetősáv (ROI) leképezése videó-pixelekre (object-fit: cover) ----
+            // CSAK a keretbe igazított sávot olvassuk: sokkal gyorsabb és pontosabb, mint
+            // a teljes képkocka, és pontosan azt olvassa, amit a felhasználó a keretbe tesz.
+            function roiRect() {
+                var vw = video.videoWidth, vh = video.videoHeight;
+                if (!vw || !vh) return null;
+                var stage = video.parentElement;                 // .scan-stage (a videó kitölti)
+                var boxW = stage.clientWidth, boxH = stage.clientHeight;
+                if (!boxW || !boxH) return null;
+                var s = Math.max(boxW / vw, boxH / vh);           // object-fit: cover skálázás
+                var offX = (boxW - vw * s) / 2, offY = (boxH - vh * s) / 2;
+                // A .scan-frame geometriája (a CSS-sel egyezően): 88% szélesség, max 560, 6:1.
+                var bandW = Math.min(boxW * 0.88, 560), bandH = bandW / 6;
+                bandH = Math.min(boxH, bandH * 1.7);              // kis függőleges ráhagyás
+                var bx = (boxW - bandW) / 2, by = (boxH - bandH) / 2;
+                var sx = (bx - offX) / s, sy = (by - offY) / s;   // box → videó koordináta
+                var sW = bandW / s, sH = bandH / s;
+                sx = Math.max(0, Math.min(sx, vw)); sy = Math.max(0, Math.min(sy, vh));
+                sW = Math.min(sW, vw - sx); sH = Math.min(sH, vh - sy);
+                return { sx: sx, sy: sy, sW: sW, sH: sH };
+            }
+            // A sávot vászonra rajzolja, OCR-hez felnagyítva (~160 px magas sorra).
+            // A teljes felbontású videóból vágunk, így a ROI éles marad (nem downscale-elt).
+            function grabBandCanvas() {
+                var r = roiRect();
+                if (!r || r.sW < 8 || r.sH < 8) return null;
+                var sc = Math.max(1, 160 / r.sH);                 // felnagyítás, sosem kicsinyítés
+                sc = Math.min(sc, 2400 / r.sW);                   // szélességi plafon
+                var w = Math.max(1, Math.round(r.sW * sc)), h = Math.max(1, Math.round(r.sH * sc));
                 canvas.width = w; canvas.height = h;
                 var ctx = canvas.getContext('2d', { willReadFrequently: true });
-                try { ctx.filter = 'blur(1px)'; } catch (e) {}
-                ctx.drawImage(bmp, 0, 0, w, h);
-                try { ctx.filter = 'none'; } catch (e) {}
-                if (bmp.close) bmp.close();
+                ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(video, r.sx, r.sy, r.sW, r.sH, 0, 0, w, h);
                 return canvas;
             }
-            // Valódi, nagy felbontású fénykép (ImageCapture); ha nem támogatott, videó-képkocka.
-            async function grabStillCanvas() {
-                if (imageCapture && imageCapture.takePhoto) {
-                    try {
-                        var blob = await imageCapture.takePhoto();
-                        var bmp = await createImageBitmap(blob);
-                        return bitmapToCanvas(bmp, 1600);
-                    } catch (e) { /* esik vissza videó-képkockára */ }
-                }
-                return captureFrame();
-            }
-            async function detectBarcodeOnCanvas(cv) {
+            // Otsu-küszöbös binarizálás — kiemeli a maratott/nyomtatott VIN éleit
+            // ott, ahol a puszta kontrasztnyújtás kevés (gyenge fény, halvány gravírozás).
+            function binarizeOtsu(ctx, w, h) {
                 try {
-                    var det = detector;
-                    if (!det && 'BarcodeDetector' in window) {
-                        var sup = await window.BarcodeDetector.getSupportedFormats();
-                        var want = ['code_39', 'code_128', 'code_93', 'codabar', 'itf', 'qr_code', 'data_matrix', 'pdf417']
-                            .filter(function (f) { return sup.indexOf(f) !== -1; });
-                        if (want.length) det = new window.BarcodeDetector({ formats: want });
+                    var img = ctx.getImageData(0, 0, w, h), d = img.data, i;
+                    var hist = new Array(256); for (i = 0; i < 256; i++) hist[i] = 0;
+                    for (i = 0; i < d.length; i += 4) hist[d[i] & 255]++;
+                    var total = w * h, sum = 0; for (i = 0; i < 256; i++) sum += i * hist[i];
+                    var sumB = 0, wB = 0, wF = 0, max = 0, thr = 127, mB, mF, between;
+                    for (i = 0; i < 256; i++) {
+                        wB += hist[i]; if (wB === 0) continue; wF = total - wB; if (wF === 0) break;
+                        sumB += i * hist[i]; mB = sumB / wB; mF = (sum - sumB) / wF;
+                        between = wB * wF * (mB - mF) * (mB - mF);
+                        if (between > max) { max = between; thr = i; }
                     }
-                    if (det) { var codes = await det.detect(cv); if (codes && codes.length) return codes[0].rawValue || ''; }
+                    for (i = 0; i < d.length; i += 4) { var v = d[i] > thr ? 255 : 0; d[i] = d[i + 1] = d[i + 2] = v; }
+                    ctx.putImageData(img, 0, 0);
                 } catch (e) {}
-                return '';
+            }
+            function recognizeText(cv, psm) {
+                return ocrRecognize(cv, psm).then(function (res) {
+                    return (res && res.data ? res.data.text : '') || '';
+                });
             }
 
-            // Egy automatikus OCR-próba. ÉLES fotót (takePhoto) készít — nem a lágy/moirés
-            // videó-képkockát —, mert csak az éles képből olvasható a monitor-VIN.
-            // Érvényes VIN-re azonnal rázár; gombnyomásra a legjobb tippet is elfogadja.
+            // ---- Többképkockás, pozíciónkénti szavazás ----
+            // Egyetlen képkocka OCR-je zajos, ezért ritkán tökéletes. A Tesla-WMI-vel kezdődő
+            // 17-es ablakokat pozíciónként „megszavaztatjuk", és a többségi olvasatot
+            // ellenőrizzük — így egy-egy elrontott karakter több képkocka alatt kijavul.
+            var votes = null;
+            function resetVotes() { votes = null; }
+            function votedBest() {
+                if (!votes) return null;
+                var out = '';
+                for (var p = 0; p < 17; p++) {
+                    var m = votes[p], bc = '', bn = -1;
+                    for (var ch in m) if (m[ch] > bn) { bn = m[ch]; bc = ch; }
+                    if (!bc) return null;
+                    out += bc;
+                }
+                return out.length === 17 ? out : null;
+            }
+            function pushVotesAndCheck(text) {
+                var s = (text || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                for (var i = 0; i + 17 <= s.length; i++) {
+                    var c = ocrCorrect(s.substr(i, 17));
+                    if (!startsWithWmi(c)) continue;
+                    if (!votes) { votes = []; for (var p = 0; p < 17; p++) votes.push({}); }
+                    for (var q = 0; q < 17; q++) { var chq = c.charAt(q); votes[q][chq] = (votes[q][chq] || 0) + 1; }
+                }
+                var best = votedBest();
+                if (best) { var v = vinIsValid(best); if (v && startsWithWmi(v)) return v; }
+                return null;
+            }
+
+            // Egy olvasási kör az élő sávból: szürke+kontraszt, majd binarizált próba.
+            // Érvényes VIN-re (WMI + ellenőrzőszámjegy) azonnal rázár; gombnyomásra a
+            // legjobb (szavazott) tippet is elfogadja.
             async function scanFrameOnce() {
                 if (ocrBusy || !active) return false;
                 ocrBusy = true;
                 try {
-                    var cv = await grabStillCanvas();
+                    var cv = grabBandCanvas();
                     if (!cv) return false;
-                    preprocess(cv.getContext('2d', { willReadFrequently: true }), cv.width, cv.height);
-                    var res = await ocrRecognize(cv, 3);
-                    var text = (res && res.data ? res.data.text : '') || '';
-                    var vin = findValidVin(text);
+                    var ctx = cv.getContext('2d', { willReadFrequently: true });
+                    preprocess(ctx, cv.width, cv.height);                 // szürke + kontraszt
+                    var text1 = await recognizeText(cv, 7);
+                    var vin = findValidVin(text1);
                     if (vin) { accept(vin, true); return true; }
-                    var preview = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+                    var v1 = pushVotesAndCheck(text1);
+                    if (v1) { accept(v1, true); return true; }
+
+                    binarizeOtsu(ctx, cv.width, cv.height);               // bináris (éles élek) próba
+                    var text2 = await recognizeText(cv, 7);
+                    var vin2 = findValidVin(text2);
+                    if (vin2) { accept(vin2, true); return true; }
+                    var v2 = pushVotesAndCheck(text2);
+                    if (v2) { accept(v2, true); return true; }
+
+                    var preview = (text1 + ' ' + text2).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
                     if (acceptGuessNext) {
                         acceptGuessNext = false;
-                        var g = bestCandidate(text);
+                        var g = bestCandidate(text1) || bestCandidate(text2) || votedBest();
                         if (g) { accept(g, false); return true; }
                         if (active) setHint(su().notFound + (preview ? ' · „<b>' + preview + '</b>…”' : ''), 'err');
                         return false;
@@ -1113,7 +1159,7 @@
                 while (active) {
                     var done = await scanFrameOnce();
                     if (done) return;
-                    await sleep(300); // levegő a takePhoto-k közt (előnézet ne fagyjon)
+                    await sleep(160);
                 }
             }
 
@@ -1247,13 +1293,13 @@
                     });
                     video.srcObject = stream;
                     videoTrack = stream.getVideoTracks()[0] || null;
-                    try { imageCapture = ('ImageCapture' in window && videoTrack) ? new ImageCapture(videoTrack) : null; } catch (e) { imageCapture = null; }
                     await video.play().catch(function () {});
                     // Folyamatos autofókusz, ha az eszköz támogatja (élesebb szöveg).
                     try { if (videoTrack) await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
                     await setupTorch();
                     await setupDetector();
                     acceptGuessNext = false;
+                    resetVotes();
                     scanLoop(); // folyamatos, hands-free OCR (nem await-eljük)
                 } catch (e) {
                     var name = e && e.name ? e.name : '';
@@ -1269,6 +1315,7 @@
                 if (barcodeTimer) { clearInterval(barcodeTimer); barcodeTimer = null; }
                 if (stream) { stream.getTracks().forEach(function (tr) { try { tr.stop(); } catch (e) {} }); stream = null; }
                 videoTrack = null; detector = null; imageCapture = null;
+                resetVotes();
                 video.srcObject = null;
                 overlay.hidden = true;
                 if (ocrWorker) { try { ocrWorker.terminate(); } catch (e) {} ocrWorker = null; }
